@@ -11,7 +11,7 @@ import os
 import sys
 import time
 
-import popline
+import pln
 
 PASS = 0
 FAIL = 0
@@ -32,10 +32,10 @@ def test(name, cond, detail=""):
 ETC = {}
 
 def pl_dumps(obj):
-    return popline.dumps(obj)
+    return pln.dumps(obj)
 
 def pl_loads(text):
-    return popline.loads(text)
+    return pln.loads(text)
 
 # ══════════════════════════════════════════════════════════════════
 # 单元测试
@@ -241,15 +241,15 @@ def bench_real_data():
     js_time, js_avg = bench("json.dumps", lambda: json.dumps(json_obj), N)
     print(f"  {'json.dumps':26s} {js_time:8.1f} ms  {js_avg:8.1f} us")
 
-    pl_ser_time, pl_ser_avg = bench("popline.dumps", lambda: pl_dumps(json_obj), N)
-    print(f"  {'popline.dumps':26s} {pl_ser_time:8.1f} ms  {pl_ser_avg:8.1f} us")
+    pl_ser_time, pl_ser_avg = bench("pln.dumps", lambda: pl_dumps(json_obj), N)
+    print(f"  {'pln.dumps':26s} {pl_ser_time:8.1f} ms  {pl_ser_avg:8.1f} us")
     print(f"  {'PopLine/JSON':26s} {pl_ser_time/js_time:7.2f}x")
 
     jl_time, jl_avg = bench("json.loads", lambda: json.loads(json_text), N)
     print(f"  {'json.loads':26s} {jl_time:8.1f} ms  {jl_avg:8.1f} us")
 
-    pl_par_time, pl_par_avg = bench("popline.loads", lambda: pl_loads(pln_text), N)
-    print(f"  {'popline.loads':26s} {pl_par_time:8.1f} ms  {pl_par_avg:8.1f} us")
+    pl_par_time, pl_par_avg = bench("pln.loads", lambda: pl_loads(pln_text), N)
+    print(f"  {'pln.loads':26s} {pl_par_time:8.1f} ms  {pl_par_avg:8.1f} us")
     print(f"  {'PopLine/JSON':26s} {pl_par_time/jl_time:7.2f}x")
 
 # ══════════════════════════════════════════════════════════════════

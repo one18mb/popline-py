@@ -17,24 +17,24 @@ python setup.py build_ext --inplace
 ## 使用
 
 ```python
-import popline
+import pln
 
 # 解析
-obj = popline.loads('{\nkey: "value"\n')
+obj = pln.loads('{\nkey: "value"\n')
 
 # 序列化
-text = popline.dumps({"key": "value"})
+text = pln.dumps({"key": "value"})
 
 # JSON 互转
-obj = popline.loads_json('{"key": "value"}')
-text = popline.dumps_json({"key": "value"})
+obj = pln.loads_json('{"key": "value"}')
+text = pln.dumps_json({"key": "value"})
 ```
 
 ## 性能
 
 测试数据：`package.json`（17011 字节） / `package.pln`（13074 字节，76.9%）
 
-| 操作 | Python json | popline | 比 |
+| 操作 | Python json | pln | 比 |
 |------|------------|---------|------|
 | 解析 | 656 ms | 519 ms | **0.79x** |
 | 序列化 | 867 ms | 193 ms | **0.22x** |
