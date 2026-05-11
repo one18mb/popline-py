@@ -32,12 +32,12 @@ text = pln.dumps_json({"key": "value"})
 
 ## Performance
 
-Data: `package.json` (17011 B) / `package.pln` (13074 B, 76.9%)
+Data: `package.json` (17011 B) → `package.pln` (13074 B, **76.9%**), 5000 iterations
 
 | Operation | Python json | pln | Ratio |
 |-----------|------------|---------|-------|
-| Parse | 656 ms | 519 ms | **0.79x** |
-| Serialize | 867 ms | 193 ms | **0.22x** |
+| Parse | 656 ms (131 µs/op) | 519 ms (104 µs/op) | **0.79x** |
+| Serialize | 867 ms (173 µs/op) | 193 ms (39 µs/op) | **0.22x** |
 
 ## Test
 
