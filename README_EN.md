@@ -36,8 +36,8 @@ Data: `package.json` (17011 B) → `package.pln` (13074 B, **76.9%**), 5000 iter
 
 | Operation | Python json | pln | Ratio |
 |-----------|------------|---------|-------|
-| Parse | 656 ms (131 µs/op) | 519 ms (104 µs/op) | **0.79x** |
-| Serialize | 867 ms (173 µs/op) | 193 ms (39 µs/op) | **0.22x** |
+| Parse | 689 ms (137 µs/op) | 626 ms (125 µs/op) | **0.91x** |
+| Serialize | 935 ms (187 µs/op) | 213 ms (42 µs/op) | **0.23x** |
 
 ## Test
 
