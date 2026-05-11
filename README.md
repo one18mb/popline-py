@@ -30,6 +30,15 @@ obj = popline.loads_json('{"key": "value"}')
 text = popline.dumps_json({"key": "value"})
 ```
 
+## 性能
+
+测试数据：`package.json`（17011 字节） / `package.pln`（13074 字节，76.9%）
+
+| 操作 | Python json | popline | 比 |
+|------|------------|---------|------|
+| 解析 | 656 ms | 519 ms | **0.79x** |
+| 序列化 | 867 ms | 193 ms | **0.22x** |
+
 ## 测试
 
 ```bash
