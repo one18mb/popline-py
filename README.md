@@ -17,17 +17,17 @@ python setup.py build_ext --inplace
 ## 使用
 
 ```python
-import pln
+import popline
 
 # 解析
-obj = pln.loads('{\nkey: "value"\n')
+obj = popline.loads('{\nkey: "value"\n')
 
 # 序列化
-text = pln.dumps({"key": "value"})
+text = popline.dumps({"key": "value"})
 
 # JSON 互转
-obj = pln.loads_json('{"key": "value"}')
-text = pln.dumps_json({"key": "value"})
+obj = popline.loads_json('{"key": "value"}')
+text = popline.dumps_json({"key": "value"})
 ```
 
 ## 性能

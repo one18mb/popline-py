@@ -1,7 +1,7 @@
 from setuptools import setup, Extension
 
 module = Extension(
-    'pln',
+    'popline',
     sources=['popline_module.c', 'popline.c', 'popline_parser.c', 'popline_json.c'],
     libraries=['cjson'],
     extra_compile_args=['-O2'],

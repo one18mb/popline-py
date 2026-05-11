@@ -893,14 +893,14 @@ static PyMethodDef popline_methods[] = {
     {NULL, NULL, 0, NULL}
 };
 
-static struct PyModuleDef pln_module = {
+static struct PyModuleDef popline_module = {
     PyModuleDef_HEAD_INIT,
-    "pln",
+    "popline",
     "PopLine — Line-oriented serialization format (C extension, Python-direct fast path)",
     -1,
     popline_methods
 };
 
-PyMODINIT_FUNC PyInit_pln(void) {
-    return PyModule_Create(&pln_module);
+PyMODINIT_FUNC PyInit_popline(void) {
+    return PyModule_Create(&popline_module);
 }
