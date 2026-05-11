@@ -17,17 +17,17 @@ python setup.py build_ext --inplace
 ## Usage
 
 ```python
-import popline
+import pln
 
 # Parse
-obj = popline.loads('{\nkey: "value"\n')
+obj = pln.loads('{\nkey: "value"\n')
 
 # Serialize
-text = popline.dumps({"key": "value"})
+text = pln.dumps({"key": "value"})
 
 # JSON conversion
-obj = popline.loads_json('{"key": "value"}')
-text = popline.dumps_json({"key": "value"})
+obj = pln.loads_json('{"key": "value"}')
+text = pln.dumps_json({"key": "value"})
 ```
 
 ## Performance
