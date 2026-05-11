@@ -1,0 +1,663 @@
+{
+	"name": "popdev-kit",
+	"private": true,
+	"displayName": "%displayName%",
+	"description": "%description%",
+	"version": "0.9.1",
+	"publisher": "popdev-labs",
+	"icon": "resources/popdev-icon.png",
+	"l10n": "./l10n",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/one18mb/popdev-kit.git"
+	},
+	"bugs": {
+		"url": "https://github.com/one18mb/popdev-kit/issues"
+	},
+	"license": "MIT",
+	"engines": {
+		"vscode": "^1.82.0"
+	},
+	"extensionKind": [
+		"ui"
+	],
+	"categories": [
+		"Other"
+	],
+	"keywords": [
+		"popline",
+		"serialization",
+		"data"
+	],
+	"scripts": {
+		"compile": "webpack --mode none && yarn lint && yarn test",
+		"watch": "webpack --mode none --watch",
+		"lint": "eslint -c .eslintrc.js --ext .ts ./src",
+		"test": "mocha ./dist/node/*.test.js -ui tdd",
+		"build": "tsc -p tsconfig.json",
+		"clean": "rimraf dist out",
+		"preversion": "yarn compile",
+		"postversion": "git push && git push --tags",
+		"format": "prettier --write src/**/*.ts",
+		"docs": "typedoc --out docs src",
+		"bench": "node dist/bench/index.js",
+		"coverage": "c8 mocha ./dist/node/*.test.js",
+		"publish": "vsce publish",
+		"package": "vsce package",
+		"dev": "tsc --watch"
+	},
+	"activationEvents": [
+		"onStartupFinished",
+		"onCommand:popdev-kit.format",
+		"onCommand:popdev-kit.preview"
+	],
+	"main": "./dist/node/extension.js",
+	"browser": "./dist/browser/extension.js",
+	"enabledApiProposals": [
+		"resolvers",
+		"contribViewsRemote",
+		"telemetry"
+	],
+	"capabilities": {
+		"virtualWorkspaces": true,
+		"untrustedWorkspaces": {
+			"supported": true
+		}
+	},
+	"contributes": {
+		"walkthroughs": [
+			{
+				"id": "popdevWalkthrough",
+				"title": "%walkthrough.title%",
+				"description": "Get started with PopDev Kit: build, preview, and publish your tools.",
+				"when": "!isWeb",
+				"steps": [
+					{
+						"id": "explore.commands",
+						"title": "%walkthrough.exploreCommands.title%",
+						"description": "%walkthrough.exploreCommands.description%",
+						"media": {
+							"altText": "%walkthrough.exploreCommands.imageAltText%",
+							"image": {
+								"light": "resources/walkthrough/commands-light.png",
+								"dark": "resources/walkthrough/commands-dark.png",
+								"hc": "resources/walkthrough/commands-hc.png",
+								"hcLight": "resources/walkthrough/commands-light.png"
+							}
+						}
+					},
+					{
+						"id": "open.project",
+						"title": "%walkthrough.openProject.title%",
+						"description": "%walkthrough.openProject.description%",
+						"when": "popdevProjectOpen",
+						"media": {
+							"markdown": "resources/walkthrough/open-project.md"
+						}
+					},
+					{
+						"id": "create.project",
+						"title": "%walkthrough.createProject.title%",
+						"description": "%walkthrough.createProject.description%",
+						"when": "popdevProjectOpen",
+						"media": {
+							"markdown": "resources/walkthrough/create-project.md"
+						}
+					},
+					{
+						"id": "run.preview",
+						"title": "%walkthrough.runPreview.title%",
+						"description": "%walkthrough.runPreview.description%",
+						"when": "popdevProjectOpen",
+						"media": {
+							"altText": "%walkthrough.runPreview.imageAltText%",
+							"image": {
+								"light": "resources/walkthrough/preview-light.png",
+								"dark": "resources/walkthrough/preview-dark.png",
+								"hc": "resources/walkthrough/preview-hc.png",
+								"hcLight": "resources/walkthrough/preview-light.png"
+							}
+						}
+					},
+					{
+						"id": "configure.env",
+						"title": "%walkthrough.configureEnv.title%",
+						"description": "%walkthrough.configureEnv.description%",
+						"when": "popdevProjectOpen",
+						"media": {
+							"altText": "%walkthrough.configureEnv.imageAltText%",
+							"image": {
+								"light": "resources/walkthrough/env-light.png",
+								"dark": "resources/walkthrough/env-dark.png",
+								"hc": "resources/walkthrough/env-hc.png",
+								"hcLight": "resources/walkthrough/env-light.png"
+							}
+						}
+					},
+					{
+						"id": "install.tools",
+						"title": "%walkthrough.installTools.title%",
+						"description": "%walkthrough.installTools.description%",
+						"when": "popdevProjectOpen",
+						"media": {
+							"markdown": "resources/walkthrough/install-tools.md"
+						}
+					},
+					{
+						"id": "run.debug",
+						"title": "%walkthrough.runDebug.title%",
+						"description": "%walkthrough.runDebug.description%",
+						"when": "popdevProjectOpen",
+						"media": {
+							"altText": "%walkthrough.runDebug.imageAltText%",
+							"image": {
+								"light": "resources/walkthrough/debug-view-light.png",
+								"dark": "resources/walkthrough/debug-view-dark.png",
+								"hc": "resources/walkthrough/debug-view-hc.png",
+								"hcLight": "resources/walkthrough/debug-view-light.png"
+							}
+						}
+					},
+					{
+						"id": "come.back",
+						"title": "%walkthrough.comeBack.title%",
+						"description": "%walkthrough.comeBack.description%",
+						"when": "popdevProjectOpen",
+						"media": {
+							"altText": "%walkthrough.comeBack.imageAltText%",
+							"image": "resources/walkthrough/popdev-external.png"
+						}
+					}
+				]
+			}
+		],
+		"configuration": {
+			"title": "PopDev",
+			"properties": {
+				"popdev.formatOnSave": {
+					"type": "boolean",
+					"description": "%settings.popdev.formatOnSave%",
+					"default": true
+				},
+				"popdev.formatIndentSize": {
+					"type": "number",
+					"markdownDescription": "%settings.popdev.formatIndentSize%",
+					"default": 2
+				},
+				"popdev.debug": {
+					"type": "boolean",
+					"description": "%settings.popdev.debug%",
+					"default": false
+				},
+				"popdev.useWorkspaceConfig": {
+					"type": "boolean",
+					"description": "%settings.popdev.useWorkspaceConfig%",
+					"default": true
+				},
+				"popdev.previewTheme": {
+					"type": "string",
+					"default": "light"
+				},
+				"popdev.buildOnSave": {
+					"type": "boolean",
+					"description": "%settings.popdev.buildOnSave%",
+					"default": false
+				},
+				"popdev.liveReload": {
+					"type": "boolean",
+					"description": "%settings.popdev.liveReload%",
+					"default": true
+				}
+			}
+		},
+		"resourceLabelFormatters": [
+			{
+				"scheme": "vscode-popdev",
+				"authority": "popdev+*",
+				"formatting": {
+					"label": "${path}",
+					"separator": "/",
+					"tildify": true,
+					"workspaceSuffix": "%indicator.workspaceSuffix%"
+				}
+			}
+		],
+		"commands": [
+			{
+				"command": "popdev-kit.format",
+				"title": "%command.format%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.preview",
+				"title": "%command.preview%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.build",
+				"title": "%command.build%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.publish",
+				"title": "%command.publish%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.openConfig",
+				"title": "%command.openConfig%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.showOutput",
+				"title": "%command.showOutput%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.runTask",
+				"title": "%command.runTask%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.stopTask",
+				"title": "%command.stopTask%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.explorer.openInEditor",
+				"title": "%command.explorer.openInEditor%",
+				"category": "PopDev",
+				"icon": "$(go-to-file)"
+			},
+			{
+				"command": "popdev-kit.explorer.revealInSidebar",
+				"title": "%command.explorer.revealInSidebar%",
+				"category": "PopDev",
+				"icon": "$(empty-window)"
+			},
+			{
+				"command": "popdev-kit.reloadWindow",
+				"title": "%command.reloadWindow%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.showLog",
+				"title": "%command.showLog%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.getHelp",
+				"title": "%command.getHelp%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.getStarted",
+				"title": "%command.getStarted%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.provideFeedback",
+				"title": "%command.provideFeedback%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.reportIssue",
+				"title": "%command.reportIssue%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.explorer.removeProject",
+				"title": "%command.explorer.removeProject%",
+				"category": "PopDev",
+				"icon": "$(close)"
+			},
+			{
+				"command": "popdev-kit.explorer.openInCurrentWindow",
+				"title": "%command.explorer.openInCurrentWindow%",
+				"category": "PopDev",
+				"icon": "$(arrow-right)"
+			},
+			{
+				"command": "popdev-kit.explorer.openInNewWindow",
+				"title": "%command.explorer.openInNewWindow%",
+				"category": "PopDev",
+				"icon": "$(empty-window)"
+			},
+			{
+				"command": "popdev-kit.explorer.setDefault",
+				"title": "%command.explorer.setDefault%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.explorer.deleteConfig",
+				"title": "%command.explorer.deleteConfig%",
+				"category": "PopDev"
+			},
+			{
+				"command": "popdev-kit.explorer.refresh",
+				"title": "%command.explorer.refresh%",
+				"category": "PopDev",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "popdev-kit.explorer.addConfig",
+				"title": "%command.explorer.addConfig%",
+				"category": "PopDev",
+				"icon": "$(plus)"
+			},
+			{
+				"command": "popdev-kit.revealInExplorer",
+				"title": "%command.revealInExplorer%",
+				"category": "File"
+			}
+		],
+		"menus": {
+			"commandPalette": [
+				{
+					"command": "popdev-kit.format",
+					"when": "editorFocus"
+				},
+				{
+					"command": "popdev-kit.preview",
+					"when": "popdevProjectOpen"
+				},
+				{
+					"command": "popdev-kit.build",
+					"when": "popdevProjectOpen"
+				},
+				{
+					"command": "popdev-kit.publish",
+					"when": "popdevProjectOpen"
+				},
+				{
+					"command": "popdev-kit.openConfig",
+					"when": "true"
+				},
+				{
+					"command": "popdev-kit.showOutput",
+					"when": "true"
+				},
+				{
+					"command": "popdev-kit.runTask",
+					"when": "popdevProjectOpen"
+				},
+				{
+					"command": "popdev-kit.stopTask",
+					"when": "popdevProjectOpen"
+				},
+				{
+					"command": "popdev-kit.reloadWindow",
+					"when": "popdevProjectOpen"
+				},
+				{
+					"command": "popdev-kit.showLog"
+				},
+				{
+					"command": "popdev-kit.getHelp",
+					"when": "true"
+				},
+				{
+					"command": "popdev-kit.getStarted",
+					"when": "false"
+				},
+				{
+					"command": "popdev-kit.provideFeedback",
+					"when": "true"
+				},
+				{
+					"command": "popdev-kit.reportIssue",
+					"when": "true"
+				},
+				{
+					"command": "popdev-kit.explorer.openInEditor",
+					"when": "false"
+				},
+				{
+					"command": "popdev-kit.explorer.revealInSidebar",
+					"when": "false"
+				},
+				{
+					"command": "popdev-kit.explorer.removeProject",
+					"when": "false"
+				},
+				{
+					"command": "popdev-kit.explorer.openInCurrentWindow",
+					"when": "false"
+				},
+				{
+					"command": "popdev-kit.explorer.openInNewWindow",
+					"when": "false"
+				},
+				{
+					"command": "popdev-kit.explorer.setDefault",
+					"when": "false"
+				},
+				{
+					"command": "popdev-kit.explorer.deleteConfig",
+					"when": "false"
+				},
+				{
+					"command": "popdev-kit.explorer.refresh",
+					"when": "false"
+				},
+				{
+					"command": "popdev-kit.explorer.addConfig",
+					"when": "false"
+				},
+				{
+					"command": "popdev-kit.revealInExplorer",
+					"when": "popdevProjectOpen"
+				}
+			],
+			"statusBar/remoteIndicator": [
+				{
+					"command": "popdev-kit.format",
+					"when": "editorFocus",
+					"group": "popdev_10_0_local@1"
+				},
+				{
+					"command": "popdev-kit.preview",
+					"when": "popdevProjectOpen",
+					"group": "popdev_10_0_local@2"
+				},
+				{
+					"command": "popdev-kit.build",
+					"when": "popdevProjectOpen && !popdev.building",
+					"group": "popdev_10_0_local@1"
+				},
+				{
+					"command": "popdev-kit.publish",
+					"when": "popdevProjectOpen && popdev.built",
+					"group": "popdev_10_0_local@2"
+				},
+				{
+					"command": "popdev-kit.reloadWindow",
+					"when": "popdevProjectOpen",
+					"group": "popdev_10_1_open@3"
+				},
+				{
+					"command": "popdev-kit.showLog",
+					"when": "popdevProjectOpen",
+					"group": "popdev_10_1_open@9"
+				}
+			],
+			"view/title": [
+				{
+					"command": "popdev-kit.explorer.addConfig",
+					"when": "view == popdevProjects",
+					"group": "navigation@1"
+				},
+				{
+					"command": "popdev-kit.explorer.refresh",
+					"when": "view == popdevProjects",
+					"group": "navigation@2"
+				}
+			],
+			"view/item/context": [
+				{
+					"command": "popdev-kit.explorer.openInCurrentWindow",
+					"when": "view == popdevProjects && viewItem == project",
+					"group": "1_project@1"
+				},
+				{
+					"command": "popdev-kit.explorer.openInCurrentWindow",
+					"when": "view == popdevProjects && viewItem == project",
+					"group": "inline@1"
+				},
+				{
+					"command": "popdev-kit.explorer.openInNewWindow",
+					"when": "view == popdevProjects && viewItem == project",
+					"group": "1_project@1"
+				},
+				{
+					"command": "popdev-kit.explorer.openInNewWindow",
+					"when": "view == popdevProjects && viewItem == project",
+					"group": "inline@2"
+				},
+				{
+					"command": "popdev-kit.explorer.removeProject",
+					"when": "view == popdevProjects && viewItem == project",
+					"group": "2_project@"
+				},
+				{
+					"command": "popdev-kit.explorer.removeProject",
+					"when": "view == popdevProjects && viewItem == project",
+					"group": "inline@2"
+				},
+				{
+					"command": "popdev-kit.explorer.openInCurrentWindow",
+					"when": "view == popdevProjects && viewItem == config",
+					"group": "1_config@1"
+				},
+				{
+					"command": "popdev-kit.explorer.openInCurrentWindow",
+					"when": "view == popdevProjects && viewItem == config",
+					"group": "inline@1"
+				},
+				{
+					"command": "popdev-kit.explorer.openInNewWindow",
+					"when": "view == popdevProjects && viewItem == config",
+					"group": "1_config@1"
+				},
+				{
+					"command": "popdev-kit.explorer.openInNewWindow",
+					"when": "view == popdevProjects && viewItem == config",
+					"group": "inline@2"
+				},
+				{
+					"command": "popdev-kit.explorer.setDefault",
+					"when": "view == popdevProjects && viewItem =~ /^(config|activeConfig)$/",
+					"group": "2_config@2"
+				},
+				{
+					"command": "popdev-kit.explorer.deleteConfig",
+					"when": "view == popdevProjects && viewItem =~ /^(config|activeConfig)$/",
+					"group": "2_config@2"
+				}
+			],
+			"explorer/context": [
+				{
+					"command": "popdev-kit.revealInExplorer",
+					"when": "popdevProjectOpen",
+					"group": "navigation@20"
+				}
+			],
+			"editor/title/context": [
+				{
+					"command": "popdev-kit.revealInExplorer",
+					"when": "popdevProjectOpen",
+					"group": "2_files@20"
+				}
+			]
+		},
+		"views": {
+			"popdev": [
+				{
+					"id": "popdevProjects",
+					"name": "%popdevView.name%",
+					"group": "projects@3",
+					"when": "popdevEnabled",
+					"remoteName": "popdev"
+				}
+			]
+		},
+		"keybindings": [
+			{
+				"command": "popdev-kit.revealInExplorer",
+				"key": "shift+alt+p",
+				"when": "editorFocus && popdevProjectOpen"
+			}
+		],
+		"viewsWelcome": [
+			{
+				"view": "popdevProjects",
+				"when": "!popdevEnabled",
+				"contents": "%welcome.enablePopDev%"
+			},
+			{
+				"view": "popdevProjects",
+				"when": "popdev.noProjects",
+				"contents": "%welcome.createProject%"
+			}
+		],
+		"remoteHelp": {
+			"getStarted": {
+				"id": "popdevWalkthrough"
+			},
+			"documentation": "https://docs.popdev.example.com",
+			"issues": "https://github.com/one18mb/popdev-kit/issues",
+			"remoteName": "popdev"
+		}
+	},
+	"devDependencies": {
+		"@types/mocha": "^10.0.2",
+		"@types/node": "18.x",
+		"@types/vscode": "^1.82.0",
+		"@types/webpack": "^5.28.3",
+		"@typescript-eslint/eslint-plugin": "^6.7.5",
+		"@typescript-eslint/parser": "^6.7.5",
+		"@vscode/extension-telemetry": "0.8.5",
+		"@vscode/l10n": "^0.0.16",
+		"copy-webpack-plugin": "^11.0.0",
+		"decompress": "^4.2.1",
+		"eslint": "^8.51.0",
+		"event-stream": "^4.0.1",
+		"gulp-filter": "^7.0.0",
+		"mocha": "^10.2.0",
+		"p-all": "^3.0.0",
+		"ts-loader": "^9.5.0",
+		"typescript": "^5.2.2",
+		"typescript-formatter": "^7.2.2",
+		"vinyl": "^2.2.1",
+		"vinyl-fs": "^3.0.3",
+		"vscode-jsonrpc": "5.0.1",
+		"vscode-tas-client": "^0.1.63",
+		"webpack": "^5.88.2",
+		"webpack-cli": "^5.1.4",
+		"process": "^0.11.10",
+		"assert": "^2.1.0",
+		"safe-buffer": "^5.2.1",
+		"stream-browserify": "^3.0.0",
+		"constants-browserify": "^1.0.0",
+		"@vscode-internal/remote-web-rpc": "2.1.0",
+		"c8": "^8.0.1",
+		"prettier": "^3.1.0",
+		"rimraf": "^5.0.5",
+		"typedoc": "^0.25.0",
+		"vsce": "^2.15.0"
+	},
+	"__metadata": {
+		"id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		"publisherId": "f9e8d7c6-b5a4-3210-fedc-ba9876543210",
+		"publisherDisplayName": "PopDev Labs",
+		"targetPlatform": "undefined",
+		"isApplicationScoped": false,
+		"isPreReleaseVersion": false,
+		"hasPreReleaseVersion": false,
+		"installedTimestamp": 1712345678901,
+		"pinned": false,
+		"preRelease": false,
+		"source": "gallery",
+		"size": 3186494
+	}
+}
