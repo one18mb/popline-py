@@ -196,6 +196,33 @@ static int fhandle_string_line(fctx_t *f, const char *line, int len) {
     return 1;
 }
 
+/* ─── 连缀容器解析 ──────────────────────────────── */
+
+__attribute__((always_inline))
+static inline int fparse_inline_containers(fctx_t *f, const char *s, int len) {
+    while (len > 0) {
+        while (len > 0 && (*s == ' ' || *s == '\t')) { s++; len--; }
+        if (len <= 0) break;
+        if (*s != '{' && *s != '[') {
+            snprintf(f->error, sizeof(f->error), "连缀容器只能包含 '{' 或 '['");
+            return -1;
+        }
+        pln_value_t *v = (*s == '{') ? pln_value_new_object() : pln_value_new_array();
+        if (f->frames_len == 0) {
+            f->root = v;
+            fctx_push(f, v);
+        } else {
+            fctx_frame_t *frame = &f->frames[f->frames_len - 1];
+            v->key = f->key; f->key = NULL; f->key_len = 0;
+            *frame->tail = v;
+            frame->tail = &v->next;
+            fctx_push(f, v);
+        }
+        s++; len--;
+    }
+    return 0;
+}
+
 /* ─── 逐行解析 ─────────────────────────────────────── */
 
 __attribute__((always_inline))
@@ -225,6 +252,15 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
     int rest_len = len - value_start;
 
     if (f->frames_len == 0 || (f->frames_len == 1 && f->frames[0].container == NULL)) {
+        /* 检查顶层连缀容器：如 `[ [` 或 `[ {` */
+        if (rest_len > 1 && rest[0] == '[') {
+            const char *rp = rest + 1;
+            int rl = rest_len - 1;
+            while (rl > 0 && (*rp == ' ' || *rp == '\t')) { rp++; rl--; }
+            if (rl > 0 && (*rp == '[' || *rp == '{')) {
+                return fparse_inline_containers(f, rest, rest_len);
+            }
+        }
         pln_value_t *v = fparse_value(f, rest, rest_len);
         if (!v) return f->error[0] ? -1 : 0;
         if (v->type != PLN_OBJECT && v->type != PLN_ARRAY) {
@@ -268,6 +304,16 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
         int vlen = rest_len - klen - 2;
         if (vlen <= 0) return 0;
 
+        /* 检查值连缀容器：`key: [ [` 或 `key: [ {` */
+        if (vlen > 1 && (vpart[0] == '[' || vpart[0] == '{')) {
+            const char *rp = vpart + 1;
+            int rl = vlen - 1;
+            while (rl > 0 && (*rp == ' ' || *rp == '\t')) { rp++; rl--; }
+            if (rl > 0 && (*rp == '[' || *rp == '{')) {
+                return fparse_inline_containers(f, vpart, vlen);
+            }
+        }
+
         pln_value_t *v = fparse_value(f, vpart, vlen);
         if (!v) return f->error[0] ? -1 : 0;
         fctx_add_value(f, v);
@@ -276,6 +322,15 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
     }
 
     if (top->type == PLN_ARRAY) {
+        /* 检查数组元素连缀容器：如 `[ [`、`[ {`、`{ [`、`{ {` */
+        if (rest_len > 1 && (rest[0] == '[' || rest[0] == '{')) {
+            const char *rp = rest + 1;
+            int rl = rest_len - 1;
+            while (rl > 0 && (*rp == ' ' || *rp == '\t')) { rp++; rl--; }
+            if (rl > 0 && (*rp == '[' || *rp == '{')) {
+                return fparse_inline_containers(f, rest, rest_len);
+            }
+        }
         pln_value_t *v = fparse_value(f, rest, rest_len);
         if (!v) return f->error[0] ? -1 : 0;
         fctx_add_value(f, v);

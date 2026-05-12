@@ -495,6 +495,51 @@ invalid:
 }
 
 /* Parse one line */
+/* ─── 连缀容器解析 ─────────────────────────────────── */
+static int pp_inline_containers(py_parse_ctx_t *pp, const char *s, int len) {
+    while (len > 0) {
+        while (len > 0 && (*s == ' ' || *s == '\t')) { s++; len--; }
+        if (len <= 0) break;
+        if (*s != '{' && *s != '[') {
+            snprintf(pp->error, sizeof(pp->error), "连缀容器只能包含 '{' 或 '['");
+            return -1;
+        }
+        if (*s == '{') {
+            PyObject *d = PyDict_New();
+            if (pp->frames_len == 1 && pp->types[0] == -1) {
+                pp_push(pp, d, 0);
+            } else {
+                PyObject *top = pp_top(pp);
+                if (pp_top_type(pp) == 0) {  /* object */
+                    PyDict_SetItem(top, pp->key_obj, d);
+                    Py_DECREF(d);
+                } else {  /* array */
+                    PyList_Append(top, d);
+                    Py_DECREF(d);
+                }
+                pp_push(pp, d, 0);
+            }
+        } else {
+            PyObject *a = PyList_New(0);
+            if (pp->frames_len == 1 && pp->types[0] == -1) {
+                pp_push(pp, a, 1);
+            } else {
+                PyObject *top = pp_top(pp);
+                if (pp_top_type(pp) == 0) {  /* object */
+                    PyDict_SetItem(top, pp->key_obj, a);
+                    Py_DECREF(a);
+                } else {  /* array */
+                    PyList_Append(top, a);
+                    Py_DECREF(a);
+                }
+                pp_push(pp, a, 1);
+            }
+        }
+        s++; len--;
+    }
+    return 0;
+}
+
 static int pp_parse_line(py_parse_ctx_t *pp, const char *line, int len) {
     if (len > 0 && line[len - 1] == '\r') len--;
 
@@ -521,6 +566,14 @@ static int pp_parse_line(py_parse_ctx_t *pp, const char *line, int len) {
 
     /* Root level: must be { or [ */
     if (pp->frames_len == 0 || (pp->frames_len == 1 && pp->types[0] == -1)) {
+        /* Check top-level inline containers: `[ [` or `[ {` */
+        if (rest_len > 1 && *rest == '[') {
+            const char *rp = rest + 1;
+            int rl = rest_len - 1;
+            while (rl > 0 && (*rp == ' ' || *rp == '\t')) { rp++; rl--; }
+            if (rl > 0 && (*rp == '[' || *rp == '{'))
+                return pp_inline_containers(pp, rest, rest_len);
+        }
         if (rest_len == 1 && *rest == '{') {
             PyObject *d = PyDict_New();
             pp_push(pp, d, 0);
@@ -562,6 +615,14 @@ static int pp_parse_line(py_parse_ctx_t *pp, const char *line, int len) {
         const char *vpart = rest + key_sep + 2;
         int vlen = rest_len - key_sep - 2;
 
+        /* Check value inline containers: `key: [ [` or `key: [ {` */
+        if (vlen > 1 && (*vpart == '[' || *vpart == '{')) {
+            const char *rp = vpart + 1;
+            int rl = vlen - 1;
+            while (rl > 0 && (*rp == ' ' || *rp == '\t')) { rp++; rl--; }
+            if (rl > 0 && (*rp == '[' || *rp == '{'))
+                return pp_inline_containers(pp, vpart, vlen);
+        }
         if (vlen == 1 && *vpart == '{') {
             PyObject *d = PyDict_New();
             PyDict_SetItem(pp_top(pp), pp->key_obj, d);
@@ -585,6 +646,14 @@ static int pp_parse_line(py_parse_ctx_t *pp, const char *line, int len) {
     }
 
     if (typ == 1) {  /* array */
+        /* Check array element inline containers: `[ [`、`[ {`、`{ [`、`{ {` */
+        if (rest_len > 1 && (*rest == '[' || *rest == '{')) {
+            const char *rp = rest + 1;
+            int rl = rest_len - 1;
+            while (rl > 0 && (*rp == ' ' || *rp == '\t')) { rp++; rl--; }
+            if (rl > 0 && (*rp == '[' || *rp == '{'))
+                return pp_inline_containers(pp, rest, rest_len);
+        }
         if (rest_len == 1 && *rest == '{') {
             PyObject *d = PyDict_New();
             PyList_Append(pp_top(pp), d);

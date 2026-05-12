@@ -321,6 +321,57 @@ void pln_value_free(pln_value_t *v) {
 
 /* ─── DOM 序列化 ──────────────────────────────────────────── */
 
+/* 连缀容器序列化：递归写入容器开标识，若首个元素也为容器则同级连缀 */
+static void pln_write_value(pln_gen_t *g, pln_value_t *v);
+static void pln_write_inline_chain(pln_gen_t *g, pln_value_t *v, int first) {
+    char ch = (v->type == PLN_OBJECT) ? '{' : '[';
+    char typ = (v->type == PLN_OBJECT) ? 'o' : 'a';
+    pln_value_t *c;
+
+    if (first && g->stack_len > 0 && g_top(g) == 'o' && g->awaiting_value) {
+        g_write_len(g, &ch, 1);
+        g->awaiting_value = 0;
+    } else if (first) {
+        g_flush_pop(g);
+        g_write_len(g, &ch, 1);
+    } else {
+        g_write_len(g, &ch, 1);
+    }
+
+    c = v->child;
+    int can_inline = (v->type == PLN_ARRAY && c &&
+                      (c->type == PLN_OBJECT || c->type == PLN_ARRAY));
+
+    if (can_inline) {
+        g_push(g, typ);
+        g->need_key = 0;
+        g->awaiting_value = 0;
+        pln_write_inline_chain(g, c, 0);
+
+        for (c = c->next; c; c = c->next) pln_write_value(g, c);
+
+        g->stack_len--;
+        g->pending_pop++;
+        if (g_top(g) == 'o') g->need_key = 1;
+    } else {
+        g_writec(g, '\n');
+        g_push(g, typ);
+        g->need_key = (typ == 'o');
+        g->awaiting_value = 0;
+        if (v->type == PLN_OBJECT) {
+            for (c = v->child; c; c = c->next) {
+                if (c->key) pln_gen_key(g, c->key);
+                pln_write_value(g, c);
+            }
+        } else {
+            for (c = v->child; c; c = c->next) pln_write_value(g, c);
+        }
+        g->stack_len--;
+        g->pending_pop++;
+        if (g_top(g) == 'o') g->need_key = 1;
+    }
+}
+
 static void pln_write_value(pln_gen_t *g, pln_value_t *v) {
     pln_value_t *c;
     switch (v->type) {
@@ -333,9 +384,7 @@ static void pln_write_value(pln_gen_t *g, pln_value_t *v) {
         pln_gen_end_object(g);
         break;
     case PLN_ARRAY:
-        pln_gen_begin_array(g);
-        for (c = v->child; c; c = c->next) pln_write_value(g, c);
-        pln_gen_end_array(g);
+        pln_write_inline_chain(g, v, 1);
         break;
     case PLN_NULL:   pln_gen_value_null(g); break;
     case PLN_BOOL:   pln_gen_value_bool(g, v->data.bool_val); break;
