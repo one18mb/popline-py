@@ -49,6 +49,7 @@ typedef struct {
     int   pending_pop;
     int   need_key;
     int   awaiting_value;
+    int   has_leaf_value;
 } pln_gen_t;
 
 void pln_gen_init(pln_gen_t *g);

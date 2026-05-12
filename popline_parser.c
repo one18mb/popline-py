@@ -73,7 +73,7 @@ static void fctx_add_value(fctx_t *f, pln_value_t *v) {
 }
 
 static void fctx_pop_layers(fctx_t *f, int n) {
-    if (n >= f->frames_len) n = f->frames_len - 1; /* 保留根 */
+    if (n > f->frames_len) n = f->frames_len; /* 最多弹出所有层 */
     if (n < 0) n = 0;
     f->frames_len -= n;
 }
@@ -174,7 +174,7 @@ invalid:
 }
 
 /* Forward declarations for pop suffix helpers */
-static inline int trim_pop_suffix(const char *s, int *content_len);
+static inline int fwd_trim_pop_suffix(const char *s, int len, int *value_len);
 static inline int pop_suffix_after(const char *s, int len);
 
 static inline int fhandle_string_line(fctx_t *f, const char *line, int len) {
@@ -250,19 +250,27 @@ static inline int fparse_inline_containers(fctx_t *f, const char *s, int len) {
 
 /* ─── 行末弹出后缀检测 ────────────────────────── */
 
-/* 从内容末尾提取弹出后缀 ` N`，返回弹出数，同时减小 *content_len */
+/* 正向扫描弹出后缀 ` N`：遇到空格时检查剩余是否全为数字 */
 __attribute__((always_inline))
-static inline int trim_pop_suffix(const char *s, int *content_len) {
-    int clen = *content_len;
-    if (clen < 2) return 0;
-    int i = clen - 1;
-    if (s[i] < '0' || s[i] > '9') return 0;
-    while (i > 0 && s[i-1] >= '0' && s[i-1] <= '9') i--;
-    if (i == 0 || s[i-1] != ' ') return 0;
-    int n = 0;
-    for (int j = i; j < clen; j++) n = n * 10 + (s[j] - '0');
-    *content_len = i - 1;
-    return n;
+static inline int fwd_trim_pop_suffix(const char *s, int len, int *value_len) {
+    int in_string = 0;
+    for (int i = 0; i < len; i++) {
+        if (s[i] == '"') in_string = !in_string;
+        if (!in_string && s[i] == ' ') {
+            int all_digits = 1;
+            for (int j = i + 1; j < len; j++) {
+                if (s[j] < '0' || s[j] > '9') { all_digits = 0; break; }
+            }
+            if (all_digits && i + 1 < len) {
+                int n = 0;
+                for (int j = i + 1; j < len; j++) n = n * 10 + (s[j] - '0');
+                *value_len = i;
+                return n;
+            }
+        }
+    }
+    *value_len = len;
+    return 0;
 }
 
 /* 验证字符串闭合引号后内容：空=0，有效" N"=N，无效=-1 */
@@ -288,33 +296,6 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
     if (f->in_string) return fhandle_string_line(f, line, len);
 
     if (len == 0) return 0;
-
-    /* 兼容行首弹出前缀（用于容器开标识或键名行前，如：1 [、1 key: "val"） */
-    int n_pop = 0;
-    int value_start = 0;
-    if (line[0] >= '0' && line[0] <= '9') {
-        int pop_end = 1;
-        while (pop_end < len && line[pop_end] >= '0' && line[pop_end] <= '9') pop_end++;
-        if (pop_end < len && line[pop_end] == ' ') {
-            int after = pop_end + 1;
-            while (after < len && line[after] == ' ') after++;
-            if (after < len) {
-                char nc = line[after];
-                /* 前缀仅当后跟容器开标识或键值行时生效 */
-                if (nc == '{' || nc == '[' ||
-                    memchr(line + after, ':', len - after) != NULL) {
-                    n_pop = 0;
-                    for (int j = 0; j < pop_end; j++) n_pop = n_pop * 10 + (line[j] - '0');
-                    value_start = pop_end + 1;
-                }
-            }
-        }
-    }
-    if (n_pop > 0) {
-        fctx_pop_layers(f, n_pop);
-        line += value_start;
-        len -= value_start;
-    }
 
     const char *rest = line;
     int rest_len = len;
@@ -371,22 +352,23 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
         int vlen = rest_len - klen - 2;
         if (vlen <= 0) return 0;
 
-        /* 提取行末弹出后缀（仅叶值，容器开标识不处理） */
+        /* 正向扫描弹出后缀（仅叶值，容器开标识不处理） */
         int n_pop = 0;
+        int val_len = vlen;
         if (vpart[0] != '{' && vpart[0] != '[')
-            n_pop = trim_pop_suffix(vpart, &vlen);
-        if (vlen <= 0) return 0;
+            n_pop = fwd_trim_pop_suffix(vpart, vlen, &val_len);
+        if (val_len <= 0) return 0;
 
         /* 检查值连缀容器 */
-        if (vlen > 1 && (vpart[0] == '[' || vpart[0] == '{')) {
+        if (val_len > 1 && (vpart[0] == '[' || vpart[0] == '{')) {
             const char *rp = vpart + 1;
-            int rl = vlen - 1;
+            int rl = val_len - 1;
             while (rl > 0 && (*rp == ' ' || *rp == '\t')) { rp++; rl--; }
             if (rl > 0 && (*rp == '[' || *rp == '{'))
-                return fparse_inline_containers(f, vpart, vlen);
+                return fparse_inline_containers(f, vpart, val_len);
         }
 
-        pln_value_t *v = fparse_value(f, vpart, vlen);
+        pln_value_t *v = fparse_value(f, vpart, val_len);
         if (!v) return f->error[0] ? -1 : 0;
         fctx_add_value(f, v);
         if (v->type == PLN_OBJECT || v->type == PLN_ARRAY) fctx_push(f, v);
@@ -395,21 +377,22 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
     }
 
     if (top->type == PLN_ARRAY) {
-        /* 提取行末弹出后缀（仅叶值） */
+        /* 正向扫描弹出后缀（仅叶值） */
         int n_pop = 0;
+        int rest_val_len = rest_len;
         if (rest_len > 0 && rest[0] != '{' && rest[0] != '[')
-            n_pop = trim_pop_suffix(rest, &rest_len);
-        if (rest_len <= 0) return 0;
+            n_pop = fwd_trim_pop_suffix(rest, rest_len, &rest_val_len);
+        if (rest_val_len <= 0) return 0;
 
         /* 检查数组元素连缀容器 */
-        if (rest_len > 1 && (rest[0] == '[' || rest[0] == '{')) {
+        if (rest_val_len > 1 && (rest[0] == '[' || rest[0] == '{')) {
             const char *rp = rest + 1;
-            int rl = rest_len - 1;
+            int rl = rest_val_len - 1;
             while (rl > 0 && (*rp == ' ' || *rp == '\t')) { rp++; rl--; }
             if (rl > 0 && (*rp == '[' || *rp == '{'))
-                return fparse_inline_containers(f, rest, rest_len);
+                return fparse_inline_containers(f, rest, rest_val_len);
         }
-        pln_value_t *v = fparse_value(f, rest, rest_len);
+        pln_value_t *v = fparse_value(f, rest, rest_val_len);
         if (!v) return f->error[0] ? -1 : 0;
         fctx_add_value(f, v);
         if (v->type == PLN_OBJECT || v->type == PLN_ARRAY) fctx_push(f, v);

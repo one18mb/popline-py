@@ -30,6 +30,7 @@ typedef struct {
     int pending_pop;
     int need_key;
     int awaiting_value;
+    int has_leaf_value;
 } py_gen_t;
 
 static void py_gen_init(py_gen_t *g) {
@@ -84,12 +85,19 @@ static int pg_top(py_gen_t *g) {
 
 static void pg_flush_pop(py_gen_t *g) {
     if (g->pending_pop > 0) {
-        char tmp[16];
-        int x = g->pending_pop, pos = 0;
-        if (x >= 10) { if (x >= 100) { tmp[pos++] = '0' + x/100; x %= 100; } tmp[pos++] = '0' + x/10; x %= 10; }
-        tmp[pos++] = '0' + x;
-        tmp[pos++] = ' ';
-        pg_write_len(g, tmp, pos);
+        /* Insert " N" before the last \n (line-end pop suffix) */
+        if (g->len > 0 && g->buf[g->len - 1] == '\n') {
+            char tmp[16];
+            int i = 0, x = g->pending_pop;
+            int p = g->len - 1;
+            if (x >= 10) { if (x >= 100) { tmp[i++] = '0' + x/100; x %= 100; } tmp[i++] = '0' + x/10; x %= 10; }
+            tmp[i++] = '0' + x;
+            pg_ensure(g, i + 1);
+            memmove(g->buf + p + i + 1, g->buf + p, 1);
+            g->buf[p] = ' ';
+            memcpy(g->buf + p + 1, tmp, i);
+            g->len += i + 1;
+        }
         g->pending_pop = 0;
     }
 }
@@ -115,6 +123,8 @@ static PyObject *py_dumps_direct(PyObject *obj) {
     py_gen_t g;
     py_gen_init(&g);
     py_write_value(&g, obj);
+    /* Flush remaining pop: all containers including root close explicitly */
+    if (g.pending_pop > 0 && g.has_leaf_value) pg_flush_pop(&g);
     pg_ensure(&g, 1);
     g.buf[g.len] = '\0';
     PyObject *result = PyUnicode_FromString(g.buf);
@@ -129,6 +139,7 @@ static void py_write_value(py_gen_t *g, PyObject *obj) {
             g->need_key = 1;
             pg_write(g, "null\n");
         } else {
+            g->has_leaf_value = 1;
             pg_flush_pop(g);
             pg_write(g, "null\n");
         }
@@ -142,6 +153,7 @@ static void py_write_value(py_gen_t *g, PyObject *obj) {
             pg_write(g, s);
             pg_writec(g, '\n');
         } else {
+            g->has_leaf_value = 1;
             pg_flush_pop(g);
             pg_write(g, s);
             pg_writec(g, '\n');
@@ -164,6 +176,7 @@ static void py_write_value(py_gen_t *g, PyObject *obj) {
             pg_write_len(g, tmp, pos);
             pg_writec(g, '\n');
         } else {
+            g->has_leaf_value = 1;
             pg_flush_pop(g);
             pg_write_len(g, tmp, pos);
             pg_writec(g, '\n');
@@ -327,6 +340,28 @@ static int pp_top_type(py_parse_ctx_t *pp) {
     return pp->frames_len > 0 ? pp->types[pp->frames_len - 1] : -1;
 }
 
+/* Forward-scan for " N" pop suffix: when space found, check if rest is all digits */
+static int pp_fwd_trim_pop_suffix(const char *s, int len, int *value_len) {
+    int in_string = 0;
+    for (int i = 0; i < len; i++) {
+        if (s[i] == '"') in_string = !in_string;
+        if (!in_string && s[i] == ' ') {
+            int all_digits = 1;
+            for (int j = i + 1; j < len; j++) {
+                if (s[j] < '0' || s[j] > '9') { all_digits = 0; break; }
+            }
+            if (all_digits && i + 1 < len) {
+                int pop = 0;
+                for (int j = i + 1; j < len; j++) pop = pop * 10 + (s[j] - '0');
+                *value_len = i;
+                return pop;
+            }
+        }
+    }
+    *value_len = len;
+    return 0;
+}
+
 static void pp_pop_layers(py_parse_ctx_t *pp, int n) {
     if (n > pp->frames_len) n = pp->frames_len;
     pp->frames_len -= n;
@@ -374,11 +409,20 @@ static PyObject *pp_parse_string(py_parse_ctx_t *pp, const char *s, int len) {
         }
         i++;
     }
-    /* Check trailing content */
-    for (int j = i + 1; j < len; j++) {
-        if (s[j] != ' ' && s[j] != '\t') {
-            snprintf(pp->error, sizeof(pp->error), "引号后有多余内容");
-            return NULL;
+    /* Check for pop suffix " N" after closing quote */
+    int after_quote = i + 1;
+    if (after_quote < len) {
+        int trailing_len = len - after_quote;
+        int val_tmp = trailing_len;
+        if (pp_fwd_trim_pop_suffix(s + after_quote, trailing_len, &val_tmp) > 0) {
+            /* Valid pop suffix found — handled by caller's pop_layers */
+        } else {
+            for (int j = after_quote; j < len; j++) {
+                if (s[j] != ' ' && s[j] != '\t') {
+                    snprintf(pp->error, sizeof(pp->error), "引号后有多余内容");
+                    return NULL;
+                }
+            }
         }
     }
     if (!has_esc)
@@ -415,11 +459,20 @@ static int pp_handle_string_line(py_parse_ctx_t *pp, const char *line, int len) 
         }
         i++;
     }
-    /* Check trailing content */
-    for (int j = i + 1; j < len; j++) {
-        if (line[j] != ' ' && line[j] != '\t') {
-            snprintf(pp->error, sizeof(pp->error), "引号后有多余内容");
-            return -1;
+    /* Check for pop suffix " N" after closing quote */
+    int n_pop = 0;
+    int after = i + 1;
+    if (after < len) {
+        int trailing_len = len - after;
+        int val_tmp = trailing_len;
+        n_pop = pp_fwd_trim_pop_suffix(line + after, trailing_len, &val_tmp);
+        if (n_pop == 0) {
+            for (int j = after; j < len; j++) {
+                if (line[j] != ' ' && line[j] != '\t') {
+                    snprintf(pp->error, sizeof(pp->error), "引号后有多余内容");
+                    return -1;
+                }
+            }
         }
     }
     psb_append(pp, line, i);
@@ -453,6 +506,7 @@ static int pp_handle_string_line(py_parse_ctx_t *pp, const char *line, int len) 
         PyList_Append(pp_top(pp), v);
     }
     Py_DECREF(v);
+    if (n_pop > 0) pp_pop_layers(pp, n_pop);
     return 1;
 }
 
@@ -547,22 +601,8 @@ static int pp_parse_line(py_parse_ctx_t *pp, const char *line, int len) {
 
     if (len == 0) return 0;  /* empty line = message separator */
 
-    /* Parse pop prefix */
-    int n_pop = 0;
-    int value_start = 0;
-    if (line[0] >= '0' && line[0] <= '9') {
-        int pop_end = 1;
-        while (pop_end < len && line[pop_end] >= '0' && line[pop_end] <= '9') pop_end++;
-        if (pop_end < len && line[pop_end] == ' ') {
-            n_pop = 0;
-            for (int j = 0; j < pop_end; j++) n_pop = n_pop * 10 + (line[j] - '0');
-            value_start = pop_end + 1;
-        }
-    }
-    pp_pop_layers(pp, n_pop);
-
-    const char *rest = line + value_start;
-    int rest_len = len - value_start;
+    const char *rest = line;
+    int rest_len = len;
 
     /* Root level: must be { or [ */
     if (pp->frames_len == 0 || (pp->frames_len == 1 && pp->types[0] == -1)) {
@@ -638,10 +678,16 @@ static int pp_parse_line(py_parse_ctx_t *pp, const char *line, int len) {
             return 0;
         }
         /* Scalar value */
-        PyObject *v = pp_parse_scalar(pp, vpart, vlen);
+        int pop_n = 0;
+        int val_len = vlen;
+        if (vlen > 0 && vpart[0] != '{' && vpart[0] != '[')
+            pop_n = pp_fwd_trim_pop_suffix(vpart, vlen, &val_len);
+        if (val_len <= 0) return 0;
+        PyObject *v = pp_parse_scalar(pp, vpart, val_len);
         if (!v) return pp->error[0] ? -1 : 0;
         PyDict_SetItem(pp_top(pp), pp->key_obj, v);
         Py_DECREF(v);
+        if (pop_n > 0) pp_pop_layers(pp, pop_n);
         return 0;
     }
 
@@ -668,10 +714,16 @@ static int pp_parse_line(py_parse_ctx_t *pp, const char *line, int len) {
             pp_push(pp, a, 1);
             return 0;
         }
-        PyObject *v = pp_parse_scalar(pp, rest, rest_len);
+        int pop_n = 0;
+        int rest_val_len = rest_len;
+        if (rest_len > 0 && rest[0] != '{' && rest[0] != '[')
+            pop_n = pp_fwd_trim_pop_suffix(rest, rest_len, &rest_val_len);
+        if (rest_val_len <= 0) return 0;
+        PyObject *v = pp_parse_scalar(pp, rest, rest_val_len);
         if (!v) return pp->error[0] ? -1 : 0;
         PyList_Append(pp_top(pp), v);
         Py_DECREF(v);
+        if (pop_n > 0) pp_pop_layers(pp, pop_n);
         return 0;
     }
 
@@ -696,7 +748,7 @@ static PyObject *py_loads_direct(const char *text) {
             if (r < 0) {
                 PyErr_SetString(PyExc_ValueError, pp.error[0] ? pp.error : "解析错误");
                 /* Only DECREF root (frame[1]); children owned by parent */
-                if (pp.frames_len >= 2 && pp.frames[1])
+                if (pp.frames_len >= 1 && pp.frames[1])
                     Py_XDECREF(pp.frames[1]);
                 pp_free(&pp);
                 return NULL;
@@ -708,7 +760,7 @@ static PyObject *py_loads_direct(const char *text) {
                 int r = pp_parse_line(&pp, line_start, (int)strlen(line_start));
                 if (r < 0) {
                     PyErr_SetString(PyExc_ValueError, pp.error[0] ? pp.error : "解析错误");
-                    if (pp.frames_len >= 2 && pp.frames[1])
+                    if (pp.frames_len >= 1 && pp.frames[1])
                         Py_XDECREF(pp.frames[1]);
                     pp_free(&pp);
                     return NULL;
@@ -720,7 +772,7 @@ static PyObject *py_loads_direct(const char *text) {
 
     /* Result is at frame[1] (after sentinel) — steal its reference */
     PyObject *result = NULL;
-    if (pp.frames_len >= 2 && pp.frames[1]) {
+    if (pp.frames_len >= 1 && pp.frames[1]) {
         result = pp.frames[1];
         /* result has refcount 1 (from PyDict_New/PyList_New).
            We steal this reference for the caller. */

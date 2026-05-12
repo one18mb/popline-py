@@ -75,7 +75,7 @@ def test_nesting():
     obj = pl_loads('{\nouter: {\ninner: "value"\n')
     test("嵌套对象", obj["outer"]["inner"] == "value")
 
-    obj = pl_loads('[[\n1\n2\n1 [\n3\n')
+    obj = pl_loads('[[\n1\n2 1\n[\n3\n')
     test("嵌套数组", obj == [[1, 2], [3]])
 
     obj = pl_loads('{\ntags: [\n"web"\n"primary"\n')
@@ -83,10 +83,10 @@ def test_nesting():
 
 def test_pop():
     print("── 弹出机制 ──")
-    obj = pl_loads('{\nouter: {\ninner: "value"\n1 mid: "other"\n')
+    obj = pl_loads('{\nouter: {\ninner: "value" 1\nmid: "other"\n')
     test("弹出1层", obj == {"outer": {"inner": "value"}, "mid": "other"})
 
-    obj = pl_loads('{\na: {\nb: {\nc: "deep"\n2 x: "top"\n')
+    obj = pl_loads('{\na: {\nb: {\nc: "deep" 2\nx: "top"\n')
     test("批量弹出2层", obj["x"] == "top")
 
 def test_strings():

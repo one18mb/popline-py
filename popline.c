@@ -115,13 +115,20 @@ static inline char g_top(pln_gen_t *g) {
 
 static void g_flush_pop(pln_gen_t *g) {
     if (g->pending_pop > 0) {
-        /* inline itoa — faster than snprintf */
-        char tmp[16];
-        int x = g->pending_pop, pos = 0;
-        if (x >= 10) { if (x >= 100) { tmp[pos++] = '0' + x/100; x %= 100; } tmp[pos++] = '0' + x/10; x %= 10; }
-        tmp[pos++] = '0' + x;
-        tmp[pos++] = ' ';
-        g_write_len(g, tmp, pos);
+        /* Insert " N" before the last \n (line-end pop suffix).
+         * Buffer currently ends with \n from the previous value line. */
+        if (g->len > 0 && g->buf[g->len - 1] == '\n') {
+            char tmp[16];
+            int i = 0, x = g->pending_pop;
+            int p = g->len - 1;
+            if (x >= 10) { if (x >= 100) { tmp[i++] = '0' + x/100; x %= 100; } tmp[i++] = '0' + x/10; x %= 10; }
+            tmp[i++] = '0' + x;
+            g_ensure(g, i + 1);
+            memmove(g->buf + p + i + 1, g->buf + p, 1);
+            g->buf[p] = ' ';
+            memcpy(g->buf + p + 1, tmp, i);
+            g->len += i + 1;
+        }
         g->pending_pop = 0;
     }
 }
@@ -166,6 +173,7 @@ void pln_gen_key(pln_gen_t *g, const char *k) {
 }
 
 static void g_put_value_len(pln_gen_t *g, const char *s, int n) {
+    g->has_leaf_value = 1;
     if (g_top(g) == 'o') {
         g->awaiting_value = 0;
         g_write_len(g, s, n);
@@ -397,6 +405,8 @@ char *pln_dumps(pln_value_t *v) {
     pln_gen_t g;
     pln_gen_init(&g);
     pln_write_value(&g, v);
+    /* Flush remaining pop: all containers including root close explicitly */
+    if (g.pending_pop > 0 && g.has_leaf_value) g_flush_pop(&g);
     const char *s = pln_gen_getvalue(&g);
     char *result = pln_strdup(s);
     pln_gen_free(&g);
