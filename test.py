@@ -75,7 +75,7 @@ def test_nesting():
     obj = pl_loads('{\nouter: {\ninner: "value"\n')
     test("嵌套对象", obj["outer"]["inner"] == "value")
 
-    obj = pl_loads('[[\n1\n2 1\n[\n3\n')
+    obj = pl_loads('[\n[\n1\n2 1\n[\n3\n')
     test("嵌套数组", obj == [[1, 2], [3]])
 
     obj = pl_loads('{\ntags: [\n"web"\n"primary"\n')

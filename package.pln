@@ -54,12 +54,14 @@ virtualWorkspaces: true
 untrustedWorkspaces: {
 supported: true 2
 contributes: {
-walkthroughs: [{
+walkthroughs: [
+{
 id: "popdevWalkthrough"
 title: "%walkthrough.title%"
 description: "Get started with PopDev Kit: build, preview, and publish your tools."
 when: "!isWeb"
-steps: [{
+steps: [
+{
 id: "explore.commands"
 title: "%walkthrough.exploreCommands.title%"
 description: "%walkthrough.exploreCommands.description%"
@@ -165,7 +167,8 @@ popdev.liveReload: {
 type: "boolean"
 description: "%settings.popdev.liveReload%"
 default: true 3
-resourceLabelFormatters: [{
+resourceLabelFormatters: [
+{
 scheme: "vscode-popdev"
 authority: "popdev+*"
 formatting: {
@@ -173,7 +176,8 @@ label: "${path}"
 separator: "/"
 tildify: true
 workspaceSuffix: "%indicator.workspaceSuffix%" 3
-commands: [{
+commands: [
+{
 command: "popdev-kit.format"
 title: "%command.format%"
 category: "PopDev" 1
@@ -277,7 +281,8 @@ command: "popdev-kit.revealInExplorer"
 title: "%command.revealInExplorer%"
 category: "File" 2
 menus: {
-commandPalette: [{
+commandPalette: [
+{
 command: "popdev-kit.format"
 when: "editorFocus" 1
 {
@@ -348,7 +353,8 @@ when: "false" 1
 {
 command: "popdev-kit.revealInExplorer"
 when: "popdevProjectOpen" 2
-statusBar/remoteIndicator: [{
+statusBar/remoteIndicator: [
+{
 command: "popdev-kit.format"
 when: "editorFocus"
 group: "popdev_10_0_local@1" 1
@@ -372,7 +378,8 @@ group: "popdev_10_1_open@3" 1
 command: "popdev-kit.showLog"
 when: "popdevProjectOpen"
 group: "popdev_10_1_open@9" 2
-view/title: [{
+view/title: [
+{
 command: "popdev-kit.explorer.addConfig"
 when: "view == popdevProjects"
 group: "navigation@1" 1
@@ -380,7 +387,8 @@ group: "navigation@1" 1
 command: "popdev-kit.explorer.refresh"
 when: "view == popdevProjects"
 group: "navigation@2" 2
-view/item/context: [{
+view/item/context: [
+{
 command: "popdev-kit.explorer.openInCurrentWindow"
 when: "view == popdevProjects && viewItem == project"
 group: "1_project@1" 1
@@ -428,26 +436,31 @@ group: "2_config@2" 1
 command: "popdev-kit.explorer.deleteConfig"
 when: "view == popdevProjects && viewItem =~ /^(config|activeConfig)$/"
 group: "2_config@2" 2
-explorer/context: [{
+explorer/context: [
+{
 command: "popdev-kit.revealInExplorer"
 when: "popdevProjectOpen"
 group: "navigation@20" 2
-editor/title/context: [{
+editor/title/context: [
+{
 command: "popdev-kit.revealInExplorer"
 when: "popdevProjectOpen"
 group: "2_files@20" 3
 views: {
-popdev: [{
+popdev: [
+{
 id: "popdevProjects"
 name: "%popdevView.name%"
 group: "projects@3"
 when: "popdevEnabled"
 remoteName: "popdev" 3
-keybindings: [{
+keybindings: [
+{
 command: "popdev-kit.revealInExplorer"
 key: "shift+alt+p"
 when: "editorFocus && popdevProjectOpen" 2
-viewsWelcome: [{
+viewsWelcome: [
+{
 view: "popdevProjects"
 when: "!popdevEnabled"
 contents: "%welcome.enablePopDev%" 1
