@@ -284,7 +284,7 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
                 snprintf(f->error, sizeof(f->error), "非法键名: '%.*s'", rest_len, rest);
                 return -1;
             }
-            if (c == '"' || c == '{' || c == '}' || c == '[' || c == ']' ||
+            if (c == '"' || c == '{' || c == '[' ||
                 c == '#' || c == ' ' || c == '\t') {
                 snprintf(f->error, sizeof(f->error), "非法键名: '%.*s'", rest_len, rest);
                 return -1;

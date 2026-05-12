@@ -598,7 +598,7 @@ static int pp_parse_line(py_parse_ctx_t *pp, const char *line, int len) {
                 snprintf(pp->error, sizeof(pp->error), "非法键名: '%.*s'", rest_len, rest);
                 return -1;
             }
-            if (c == '"' || c == '{' || c == '}' || c == '[' || c == ']' ||
+            if (c == '"' || c == '{' || c == '[' ||
                 c == '#' || c == ' ' || c == '\t') {
                 snprintf(pp->error, sizeof(pp->error), "非法键名: '%.*s'", rest_len, rest);
                 return -1;
