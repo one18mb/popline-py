@@ -169,11 +169,12 @@ static void g_put_value_len(pln_gen_t *g, const char *s, int n) {
     if (g_top(g) == 'o') {
         g->awaiting_value = 0;
         g_write_len(g, s, n);
+        g_flush_pop(g);
         g_writec(g, '\n');
         g->need_key = 1;
     } else {
-        g_flush_pop(g);
         g_write_len(g, s, n);
+        g_flush_pop(g);
         g_writec(g, '\n');
     }
 }
@@ -196,12 +197,8 @@ void pln_gen_value_float(pln_gen_t *g, double v) {
     g_put_value_len(g, tmp, pos);
 }
 void pln_gen_value_string(pln_gen_t *g, const char *v) {
-    /* 写前导引号 */
     if (g_top(g) == 'o') {
         g->awaiting_value = 0;
-        g->need_key = 1;
-    } else {
-        g_flush_pop(g);
     }
 
     /* 直接写入缓冲：先快速扫描是否需要转义 */
@@ -210,14 +207,15 @@ void pln_gen_value_string(pln_gen_t *g, const char *v) {
 
     if (!has_quote) {
         /* 常见路径：无转义，一次写入 */
-        g_ensure(g, n + 3);
+        g_ensure(g, n + 16);
         g->buf[g->len++] = '"';
         memcpy(g->buf + g->len, v, n); g->len += n;
         g->buf[g->len++] = '"';
+        g_flush_pop(g);
         g->buf[g->len++] = '\n';
     } else {
         /* 罕见路径：有 ""，逐字符写入（无额外分配） */
-        int est = n + (n / 8) + 3;
+        int est = n + (n / 8) + 16;
         g_ensure(g, est);
         g->buf[g->len++] = '"';
         for (int i = 0; i < n; i++) {
@@ -225,6 +223,7 @@ void pln_gen_value_string(pln_gen_t *g, const char *v) {
             if (v[i] == '"') g->buf[g->len++] = '"';
         }
         g->buf[g->len++] = '"';
+        g_flush_pop(g);
         g->buf[g->len++] = '\n';
     }
 }

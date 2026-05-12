@@ -73,8 +73,9 @@ static void fctx_add_value(fctx_t *f, pln_value_t *v) {
 }
 
 static void fctx_pop_layers(fctx_t *f, int n) {
+    if (n >= f->frames_len) n = f->frames_len - 1; /* 保留根 */
+    if (n < 0) n = 0;
     f->frames_len -= n;
-    if (f->frames_len < 0) f->frames_len = 0;
 }
 
 static void fsb_ensure(fctx_t *f, int extra) {
@@ -172,7 +173,11 @@ invalid:
     return NULL;
 }
 
-static int fhandle_string_line(fctx_t *f, const char *line, int len) {
+/* Forward declarations for pop suffix helpers */
+static inline int trim_pop_suffix(const char *s, int *content_len);
+static inline int pop_suffix_after(const char *s, int len);
+
+static inline int fhandle_string_line(fctx_t *f, const char *line, int len) {
     int i = 0;
     while (1) {
         if (i >= len) {
@@ -187,6 +192,26 @@ static int fhandle_string_line(fctx_t *f, const char *line, int len) {
         i++;
     }
     fsb_append(f, line, i);
+
+    /* 检查闭合引号后内容：空=0，" N"=弹出数，其他=-1 */
+    int after = i + 1;
+    if (after < len) {
+        int n_pop = pop_suffix_after(line + after, len - after);
+        if (n_pop < 0) {
+            snprintf(f->error, sizeof(f->error),
+                     "字符串闭合引号后非法内容: '%.*s'", len - after, line + after);
+            return -1;
+        }
+        char *unesc = pln_unescape(f->strbuf, f->strbuf_len);
+        pln_value_t *v = pln_value_new_string(unesc);
+        free(unesc);
+        fctx_add_value(f, v);
+        if (n_pop > 0) fctx_pop_layers(f, n_pop);
+        f->in_string = 0;
+        f->strbuf_len = 0;
+        return 1;
+    }
+
     char *unesc = pln_unescape(f->strbuf, f->strbuf_len);
     pln_value_t *v = pln_value_new_string(unesc);
     free(unesc);
@@ -223,7 +248,38 @@ static inline int fparse_inline_containers(fctx_t *f, const char *s, int len) {
     return 0;
 }
 
-/* ─── 逐行解析 ─────────────────────────────────────── */
+/* ─── 行末弹出后缀检测 ────────────────────────── */
+
+/* 从内容末尾提取弹出后缀 ` N`，返回弹出数，同时减小 *content_len */
+__attribute__((always_inline))
+static inline int trim_pop_suffix(const char *s, int *content_len) {
+    int clen = *content_len;
+    if (clen < 2) return 0;
+    int i = clen - 1;
+    if (s[i] < '0' || s[i] > '9') return 0;
+    while (i > 0 && s[i-1] >= '0' && s[i-1] <= '9') i--;
+    if (i == 0 || s[i-1] != ' ') return 0;
+    int n = 0;
+    for (int j = i; j < clen; j++) n = n * 10 + (s[j] - '0');
+    *content_len = i - 1;
+    return n;
+}
+
+/* 验证字符串闭合引号后内容：空=0，有效" N"=N，无效=-1 */
+__attribute__((always_inline))
+static inline int pop_suffix_after(const char *s, int len) {
+    if (len <= 0) return 0;
+    if (s[0] != ' ') return -1;
+    if (len < 2 || s[1] < '0' || s[1] > '9') return -1;
+    int n = 0;
+    for (int i = 1; i < len; i++) {
+        if (s[i] < '0' || s[i] > '9') return -1;
+        n = n * 10 + (s[i] - '0');
+    }
+    return n;
+}
+
+/* ─── 逐行解析（行末弹出后缀版） ──────────────── */
 
 __attribute__((always_inline))
 static inline int fparse_line(fctx_t *f, const char *line, int len) {
@@ -233,33 +289,44 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
 
     if (len == 0) return 0;
 
+    /* 兼容行首弹出前缀（用于容器开标识或键名行前，如：1 [、1 key: "val"） */
     int n_pop = 0;
     int value_start = 0;
-
     if (line[0] >= '0' && line[0] <= '9') {
         int pop_end = 1;
         while (pop_end < len && line[pop_end] >= '0' && line[pop_end] <= '9') pop_end++;
         if (pop_end < len && line[pop_end] == ' ') {
-            n_pop = 0;
-            for (int j = 0; j < pop_end; j++) n_pop = n_pop * 10 + (line[j] - '0');
-            value_start = pop_end + 1;
+            int after = pop_end + 1;
+            while (after < len && line[after] == ' ') after++;
+            if (after < len) {
+                char nc = line[after];
+                /* 前缀仅当后跟容器开标识或键值行时生效 */
+                if (nc == '{' || nc == '[' ||
+                    memchr(line + after, ':', len - after) != NULL) {
+                    n_pop = 0;
+                    for (int j = 0; j < pop_end; j++) n_pop = n_pop * 10 + (line[j] - '0');
+                    value_start = pop_end + 1;
+                }
+            }
         }
     }
+    if (n_pop > 0) {
+        fctx_pop_layers(f, n_pop);
+        line += value_start;
+        len -= value_start;
+    }
 
-    fctx_pop_layers(f, n_pop);
+    const char *rest = line;
+    int rest_len = len;
 
-    const char *rest = line + value_start;
-    int rest_len = len - value_start;
-
+    /* 顶层：必须为 {、[ 或连缀 */
     if (f->frames_len == 0 || (f->frames_len == 1 && f->frames[0].container == NULL)) {
-        /* 检查顶层连缀容器：如 `[ [` 或 `[ {` */
         if (rest_len > 1 && rest[0] == '[') {
             const char *rp = rest + 1;
             int rl = rest_len - 1;
             while (rl > 0 && (*rp == ' ' || *rp == '\t')) { rp++; rl--; }
-            if (rl > 0 && (*rp == '[' || *rp == '{')) {
+            if (rl > 0 && (*rp == '[' || *rp == '{'))
                 return fparse_inline_containers(f, rest, rest_len);
-            }
         }
         pln_value_t *v = fparse_value(f, rest, rest_len);
         if (!v) return f->error[0] ? -1 : 0;
@@ -304,45 +371,55 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
         int vlen = rest_len - klen - 2;
         if (vlen <= 0) return 0;
 
-        /* 检查值连缀容器：`key: [ [` 或 `key: [ {` */
+        /* 提取行末弹出后缀（仅叶值，容器开标识不处理） */
+        int n_pop = 0;
+        if (vpart[0] != '{' && vpart[0] != '[')
+            n_pop = trim_pop_suffix(vpart, &vlen);
+        if (vlen <= 0) return 0;
+
+        /* 检查值连缀容器 */
         if (vlen > 1 && (vpart[0] == '[' || vpart[0] == '{')) {
             const char *rp = vpart + 1;
             int rl = vlen - 1;
             while (rl > 0 && (*rp == ' ' || *rp == '\t')) { rp++; rl--; }
-            if (rl > 0 && (*rp == '[' || *rp == '{')) {
+            if (rl > 0 && (*rp == '[' || *rp == '{'))
                 return fparse_inline_containers(f, vpart, vlen);
-            }
         }
 
         pln_value_t *v = fparse_value(f, vpart, vlen);
         if (!v) return f->error[0] ? -1 : 0;
         fctx_add_value(f, v);
         if (v->type == PLN_OBJECT || v->type == PLN_ARRAY) fctx_push(f, v);
+        if (n_pop > 0) fctx_pop_layers(f, n_pop);
         return 0;
     }
 
     if (top->type == PLN_ARRAY) {
-        /* 检查数组元素连缀容器：如 `[ [`、`[ {`、`{ [`、`{ {` */
+        /* 提取行末弹出后缀（仅叶值） */
+        int n_pop = 0;
+        if (rest_len > 0 && rest[0] != '{' && rest[0] != '[')
+            n_pop = trim_pop_suffix(rest, &rest_len);
+        if (rest_len <= 0) return 0;
+
+        /* 检查数组元素连缀容器 */
         if (rest_len > 1 && (rest[0] == '[' || rest[0] == '{')) {
             const char *rp = rest + 1;
             int rl = rest_len - 1;
             while (rl > 0 && (*rp == ' ' || *rp == '\t')) { rp++; rl--; }
-            if (rl > 0 && (*rp == '[' || *rp == '{')) {
+            if (rl > 0 && (*rp == '[' || *rp == '{'))
                 return fparse_inline_containers(f, rest, rest_len);
-            }
         }
         pln_value_t *v = fparse_value(f, rest, rest_len);
         if (!v) return f->error[0] ? -1 : 0;
         fctx_add_value(f, v);
         if (v->type == PLN_OBJECT || v->type == PLN_ARRAY) fctx_push(f, v);
+        if (n_pop > 0) fctx_pop_layers(f, n_pop);
         return 0;
     }
 
     snprintf(f->error, sizeof(f->error), "内部错误: 栈顶类型未知");
     return -1;
 }
-
-/* ─── 解析入口 ─────────────────────────────────────── */
 
 pln_value_t *pln_loads(const char *text) {
     fctx_t f;
