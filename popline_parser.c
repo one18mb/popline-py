@@ -24,7 +24,6 @@ typedef struct {
     fctx_frame_t *frames;
     int frames_len, frames_cap;
     char *key;
-    int key_len;
     char *strbuf;
     int strbuf_len, strbuf_cap;
     int in_string;
@@ -44,7 +43,7 @@ static void fctx_free(fctx_t *f) {
     f->frames = NULL;
 }
 
-static int fctx_push(fctx_t *f, pln_value_t *v) {
+static void fctx_push(fctx_t *f, pln_value_t *v) {
     if (f->frames_len >= f->frames_cap) {
         f->frames_cap *= 2;
         f->frames = (fctx_frame_t *)realloc(f->frames, f->frames_cap * sizeof(fctx_frame_t));
@@ -52,7 +51,6 @@ static int fctx_push(fctx_t *f, pln_value_t *v) {
     f->frames[f->frames_len].container = v;
     f->frames[f->frames_len].tail = v ? &v->child : NULL;
     f->frames_len++;
-    return 0;
 }
 
 static pln_value_t *fctx_top(fctx_t *f) {
@@ -66,15 +64,14 @@ static void fctx_add_value(fctx_t *f, pln_value_t *v) {
     } else {
         fctx_frame_t *frame = &f->frames[f->frames_len - 1];
         v->key = f->key;
-        f->key = NULL; f->key_len = 0;
+        f->key = NULL;
         *frame->tail = v;
         frame->tail = &v->next;
     }
 }
 
 static void fctx_pop_layers(fctx_t *f, int n) {
-    if (n > f->frames_len) n = f->frames_len; /* 最多弹出所有层 */
-    if (n < 0) n = 0;
+    if (n > f->frames_len) n = f->frames_len;
     f->frames_len -= n;
 }
 
@@ -144,8 +141,6 @@ static inline pln_value_t *fparse_value(fctx_t *f, const char *s, int len) {
     case '[':
         if (len == 1) return pln_value_new_array();
         goto invalid;
-    default:
-        break;
     }
 
     if (s[0] == '-' || (s[0] >= '0' && s[0] <= '9')) {
@@ -271,7 +266,7 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
 
     /* 消息体内不允许空行（frames_len > 0 表示在容器内） */
     if (len == 0) {
-        if (f->root && f->frames_len > 0) { snprintf(f->error, sizeof(f->error), "消息体内不允许空行"); return -1; }
+        if (f->frames_len > 0) { snprintf(f->error, sizeof(f->error), "消息体内不允许空行"); return -1; }
         return 0;
     }
 
@@ -283,9 +278,11 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
         pln_value_t *v = fparse_value(f, rest, rest_len);
         if (!v) return f->error[0] ? -1 : 0;
         f->root = v;
-        if (v->type == PLN_OBJECT || v->type == PLN_ARRAY) fctx_push(f, v);
-        /* 标量根值：消息已完整，后续内容让主循环处理 */
-        if (v->type != PLN_OBJECT && v->type != PLN_ARRAY) return 1;
+        if (v->type == PLN_OBJECT || v->type == PLN_ARRAY) {
+            fctx_push(f, v);
+        } else {
+            return 1; /* 标量根值：消息完整 */
+        }
         return 0;
     }
     /* frames_len == 0 表示消息已结束（标量根值或全部弹出）*/
@@ -316,18 +313,15 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
         free(f->key);
         f->key = (char *)malloc(klen + 1);
         memcpy(f->key, rest, klen); f->key[klen] = '\0';
-        f->key_len = klen;
 
         const char *vpart = rest + klen + 2;
         int vlen = rest_len - klen - 2;
-        if (vlen <= 0) return 0;
 
         /* 正向扫描弹出后缀（仅叶值，容器开标识不处理） */
         int n_pop = 0;
         int val_len = vlen;
         if (vpart[0] != '{' && vpart[0] != '[')
             n_pop = fwd_trim_pop_suffix(vpart, vlen, &val_len);
-        if (val_len <= 0) return 0;
 
         pln_value_t *v = fparse_value(f, vpart, val_len);
         if (!v) return f->error[0] ? -1 : 0;
@@ -343,7 +337,6 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
         int rest_val_len = rest_len;
         if (rest_len > 0 && rest[0] != '{' && rest[0] != '[')
             n_pop = fwd_trim_pop_suffix(rest, rest_len, &rest_val_len);
-        if (rest_val_len <= 0) return 0;
 
         pln_value_t *v = fparse_value(f, rest, rest_val_len);
         if (!v) return f->error[0] ? -1 : 0;
@@ -353,8 +346,7 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
         return 0;
     }
 
-    snprintf(f->error, sizeof(f->error), "内部错误: 栈顶类型未知");
-    return -1;
+    return 0;
 }
 
 pln_value_t *pln_loads(const char *text) {
@@ -368,14 +360,14 @@ pln_value_t *pln_loads(const char *text) {
         const char *nl = strchr(s, '\n');
         if (nl) {
             int r = fparse_line(&f, line_start, (int)(nl - line_start));
-            if (r < 0) { if (f.root) pln_value_free(f.root); f.root = NULL; break; }
+            if (r < 0) { pln_value_free(f.root); f.root = NULL; break; }
             if (r > 0) break; /* 消息完整，停止解析 */
             s = nl + 1;
             line_start = s;
         } else {
             if (*line_start) {
                 int r = fparse_line(&f, line_start, (int)strlen(line_start));
-                if (r < 0) { if (f.root) pln_value_free(f.root); f.root = NULL; }
+                if (r < 0) { pln_value_free(f.root); f.root = NULL; }
             }
             break;
         }

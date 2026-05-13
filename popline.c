@@ -143,7 +143,7 @@ static void g_start_container(pln_gen_t *g, const char *ch, char typ) {
     }
     g_writec(g, '\n');
     g_push(g, typ);
-    g->need_key = (typ == 'o');
+    (void)g;
     g->awaiting_value = 0;
 }
 
@@ -154,21 +154,18 @@ void pln_gen_end_object(pln_gen_t *g) {
     if (g_top(g) != 'o') { fprintf(stderr, "end_object mismatch\n"); abort(); }
     g->stack_len--;
     g->pending_pop++;
-    if (g_top(g) == 'o') g->need_key = 1;
 }
 
 void pln_gen_end_array(pln_gen_t *g) {
     if (g_top(g) != 'a') { fprintf(stderr, "end_array mismatch\n"); abort(); }
     g->stack_len--;
     g->pending_pop++;
-    if (g_top(g) == 'o') g->need_key = 1;
 }
 
 void pln_gen_key(pln_gen_t *g, const char *k) {
     g_flush_pop(g);
     g_write(g, k);
     g_write_len(g, ": ", 2);
-    g->need_key = 0;
     g->awaiting_value = 1;
 }
 
@@ -179,7 +176,6 @@ static void g_put_value_len(pln_gen_t *g, const char *s, int n) {
         g_write_len(g, s, n);
         g_flush_pop(g);
         g_writec(g, '\n');
-        g->need_key = 1;
     } else {
         g_write_len(g, s, n);
         g_flush_pop(g);

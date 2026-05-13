@@ -28,7 +28,6 @@ typedef struct {
     int *stack;          /* 0=object, 1=array */
     int stack_len, stack_cap;
     int pending_pop;
-    int need_key;
     int awaiting_value;
     int has_leaf_value;
 } py_gen_t;
@@ -112,7 +111,6 @@ static void pg_start_container(py_gen_t *g, char typ) {
     }
     pg_writec(g, '\n');
     pg_push(g, typ);
-    g->need_key = (typ == 0);
     g->awaiting_value = 0;
 }
 
@@ -136,7 +134,6 @@ static void py_write_value(py_gen_t *g, PyObject *obj) {
     if (!obj || obj == Py_None) {
         if (pg_top(g) == 0) {
             g->awaiting_value = 0;
-            g->need_key = 1;
             pg_write(g, "null\n");
         } else {
             g->has_leaf_value = 1;
@@ -149,7 +146,6 @@ static void py_write_value(py_gen_t *g, PyObject *obj) {
         const char *s = (obj == Py_True) ? "true" : "false";
         if (pg_top(g) == 0) {
             g->awaiting_value = 0;
-            g->need_key = 1;
             pg_write(g, s);
             pg_writec(g, '\n');
         } else {
@@ -172,7 +168,6 @@ static void py_write_value(py_gen_t *g, PyObject *obj) {
         }
         if (pg_top(g) == 0) {
             g->awaiting_value = 0;
-            g->need_key = 1;
             pg_write_len(g, tmp, pos);
             pg_writec(g, '\n');
         } else {
@@ -189,7 +184,6 @@ static void py_write_value(py_gen_t *g, PyObject *obj) {
         int n = snprintf(tmp, sizeof(tmp), "%.15g", d);
         if (pg_top(g) == 0) {
             g->awaiting_value = 0;
-            g->need_key = 1;
             pg_write_len(g, tmp, n);
             pg_writec(g, '\n');
         } else {
@@ -205,7 +199,6 @@ static void py_write_value(py_gen_t *g, PyObject *obj) {
         int n = (int)len;
         if (pg_top(g) == 0) {
             g->awaiting_value = 0;
-            g->need_key = 1;
         } else {
             pg_flush_pop(g);
         }
@@ -243,14 +236,12 @@ static void py_write_value(py_gen_t *g, PyObject *obj) {
             pg_flush_pop(g);
             pg_write(g, k);
             pg_write_len(g, ": ", 2);
-            g->need_key = 0;
             g->awaiting_value = 1;
             py_write_value(g, val);
             Py_XDECREF(key_str);
         }
         g->stack_len--;
         g->pending_pop++;
-        if (pg_top(g) == 0) g->need_key = 1;
         return;
     }
     if (PyList_Check(obj) || PyTuple_Check(obj)) {
@@ -264,7 +255,6 @@ static void py_write_value(py_gen_t *g, PyObject *obj) {
         }
         g->stack_len--;
         g->pending_pop++;
-        if (pg_top(g) == 0) g->need_key = 1;
         return;
     }
     /* Fallback: try str() */
@@ -273,7 +263,6 @@ static void py_write_value(py_gen_t *g, PyObject *obj) {
         const char *s = PyUnicode_AsUTF8(str);
         if (pg_top(g) == 0) {
             g->awaiting_value = 0;
-            g->need_key = 1;
         } else {
             pg_flush_pop(g);
         }
@@ -320,7 +309,7 @@ static void pp_free(py_parse_ctx_t *pp) {
     free(pp->strbuf);
 }
 
-static int pp_push(py_parse_ctx_t *pp, PyObject *container, int typ) {
+static void pp_push(py_parse_ctx_t *pp, PyObject *container, int typ) {
     if (pp->frames_len >= pp->frames_cap) {
         pp->frames_cap *= 2;
         pp->frames = (PyObject **)py_realloc(pp->frames, pp->frames_cap * sizeof(PyObject *));
@@ -329,7 +318,6 @@ static int pp_push(py_parse_ctx_t *pp, PyObject *container, int typ) {
     pp->frames[pp->frames_len] = container;
     pp->types[pp->frames_len] = typ;
     pp->frames_len++;
-    return 0;
 }
 
 static PyObject *pp_top(py_parse_ctx_t *pp) {
@@ -506,7 +494,7 @@ static int pp_handle_string_line(py_parse_ctx_t *pp, const char *line, int len) 
         PyList_Append(pp_top(pp), v);
     }
     Py_DECREF(v);
-    if (n_pop > 0) pp_pop_layers(pp, n_pop);
+    pp_pop_layers(pp, n_pop);
     return 1;
 }
 
@@ -637,7 +625,7 @@ static int pp_parse_line(py_parse_ctx_t *pp, const char *line, int len) {
         if (!v) return pp->error[0] ? -1 : 0;
         PyDict_SetItem(pp_top(pp), pp->key_obj, v);
         Py_DECREF(v);
-        if (pop_n > 0) pp_pop_layers(pp, pop_n);
+        pp_pop_layers(pp, pop_n);
         return 0;
     }
 
@@ -664,7 +652,7 @@ static int pp_parse_line(py_parse_ctx_t *pp, const char *line, int len) {
         if (!v) return pp->error[0] ? -1 : 0;
         PyList_Append(pp_top(pp), v);
         Py_DECREF(v);
-        if (pop_n > 0) pp_pop_layers(pp, pop_n);
+        pp_pop_layers(pp, pop_n);
         return 0;
     }
 

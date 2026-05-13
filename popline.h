@@ -47,7 +47,6 @@ typedef struct {
     int   stack_len;
     int   stack_cap;
     int   pending_pop;
-    int   need_key;
     int   awaiting_value;
     int   has_leaf_value;
 } pln_gen_t;
