@@ -1,6 +1,6 @@
 # PopLine Python
 
-PopLine 序列化格式的 Python C 扩展实现。
+PopLine 序列化格式的 Python C 扩展实现。零外部依赖。
 
 ## 安装
 
@@ -8,26 +8,18 @@ PopLine 序列化格式的 Python C 扩展实现。
 pip install popline-py
 ```
 
-或从源码构建：
-
-```bash
-python setup.py build_ext --inplace
-```
-
 ## 使用
 
 ```python
 import pln
 
-# 解析
+# PopLine → Python 对象
 obj = pln.loads('{\nkey: "value"\n')
+# → {"key": "value"}
 
-# 序列化
+# Python 对象 → PopLine
 text = pln.dumps({"key": "value"})
-
-# JSON 互转
-obj = pln.loads_json('{"key": "value"}')
-text = pln.dumps_json({"key": "value"})
+# → '{\nkey: "value"\n'
 ```
 
 ## 性能

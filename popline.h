@@ -85,11 +85,6 @@ void pln_value_free(pln_value_t *v);
 pln_value_t *pln_loads(const char *text);      /* 解析 PopLine 文本 → DOM 树 */
 char       *pln_dumps(pln_value_t *v);         /* DOM 树 → PopLine 文本 */
 
-/* ─── JSON 转换 ────────────────────────────────────────── */
-
-pln_value_t *pln_loads_json(const char *json);  /* JSON 文本 → PopLine DOM */
-char       *pln_dumps_json(pln_value_t *v);     /* PopLine DOM → JSON 文本 */
-
 /* ─── 辅助 ─────────────────────────────────────────────── */
 
 void pln_print(pln_value_t *v);

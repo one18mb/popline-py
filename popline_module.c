@@ -719,96 +719,6 @@ static PyObject *py_loads_direct(const char *text) {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   Old DOM-based functions (kept for loads_json/dumps_json)
-   ═══════════════════════════════════════════════════════════ */
-
-static PyObject *pln_to_python(pln_value_t *v) {
-    if (!v) Py_RETURN_NONE;
-    switch (v->type) {
-    case PLN_NULL:    Py_RETURN_NONE;
-    case PLN_BOOL:
-        Py_INCREF(v->data.bool_val ? Py_True : Py_False);
-        return v->data.bool_val ? Py_True : Py_False;
-    case PLN_INT:     return PyLong_FromLongLong(v->data.int_val);
-    case PLN_FLOAT:   return PyFloat_FromDouble(v->data.float_val);
-    case PLN_STRING:  return PyUnicode_FromString(v->data.string_val ? v->data.string_val : "");
-    case PLN_OBJECT: {
-        PyObject *dict = PyDict_New();
-        for (pln_value_t *c = v->child; c; c = c->next) {
-            PyObject *val = pln_to_python(c);
-            PyDict_SetItemString(dict, c->key ? c->key : "", val);
-            Py_DECREF(val);
-        }
-        return dict;
-    }
-    case PLN_ARRAY: {
-        PyObject *list = PyList_New(0);
-        for (pln_value_t *c = v->child; c; c = c->next) {
-            PyObject *val = pln_to_python(c);
-            PyList_Append(list, val);
-            Py_DECREF(val);
-        }
-        return list;
-    }
-    }
-    Py_RETURN_NONE;
-}
-
-static pln_value_t *python_to_pl(PyObject *obj) {
-    if (!obj || obj == Py_None)    return pln_value_new_null();
-    if (PyBool_Check(obj))         return pln_value_new_bool(obj == Py_True ? 1 : 0);
-    if (PyLong_Check(obj))         return pln_value_new_int(PyLong_AsLongLong(obj));
-    if (PyFloat_Check(obj))        return pln_value_new_float(PyFloat_AsDouble(obj));
-    if (PyUnicode_Check(obj)) {
-        Py_ssize_t len;
-        const char *s = PyUnicode_AsUTF8AndSize(obj, &len);
-        return pln_value_new_string_len(s, (int)len);
-    }
-    if (PyBytes_Check(obj)) {
-        char *s = PyBytes_AS_STRING(obj);
-        int len = (int)PyBytes_GET_SIZE(obj);
-        return pln_value_new_string_len(s, len);
-    }
-    if (PyDict_Check(obj)) {
-        pln_value_t *v = pln_value_new_object();
-        PyObject *key, *val;
-        Py_ssize_t pos = 0;
-        while (PyDict_Next(obj, &pos, &key, &val)) {
-            const char *k;
-            if (PyUnicode_Check(key)) k = PyUnicode_AsUTF8(key);
-            else if (PyBytes_Check(key)) k = PyBytes_AS_STRING(key);
-            else {
-                PyObject *str = PyObject_Str(key);
-                k = PyUnicode_AsUTF8(str);
-                Py_DECREF(str);
-            }
-            pln_value_t *child = python_to_pl(val);
-            pln_value_add_to_object(v, k, child);
-        }
-        return v;
-    }
-    if (PyList_Check(obj) || PyTuple_Check(obj)) {
-        pln_value_t *v = pln_value_new_array();
-        Py_ssize_t n = PySequence_Length(obj);
-        for (Py_ssize_t i = 0; i < n; i++) {
-            PyObject *item = PySequence_GetItem(obj, i);
-            pln_value_t *child = python_to_pl(item);
-            Py_DECREF(item);
-            pln_value_add_to_array(v, child);
-        }
-        return v;
-    }
-    PyObject *str = PyObject_Str(obj);
-    if (str) {
-        const char *s = PyUnicode_AsUTF8(str);
-        pln_value_t *v = pln_value_new_string(s ? s : "");
-        Py_DECREF(str);
-        return v;
-    }
-    return pln_value_new_null();
-}
-
-/* ═══════════════════════════════════════════════════════════
    Module functions
    ═══════════════════════════════════════════════════════════ */
 
@@ -908,28 +818,6 @@ static PyObject *py_dumps_stream(PyObject *self, PyObject *args) {
     return result;
 }
 
-static PyObject *py_loads_json(PyObject *self, PyObject *args) {
-    const char *text;
-    if (!PyArg_ParseTuple(args, "s", &text)) return NULL;
-    pln_value_t *v = pln_loads_json(text);
-    if (!v) { PyErr_SetString(PyExc_ValueError, "JSON parse error"); return NULL; }
-    PyObject *result = pln_to_python(v);
-    pln_value_free(v);
-    return result;
-}
-
-static PyObject *py_dumps_json(PyObject *self, PyObject *args) {
-    PyObject *obj;
-    if (!PyArg_ParseTuple(args, "O", &obj)) return NULL;
-    pln_value_t *v = python_to_pl(obj);
-    if (!v) { PyErr_SetString(PyExc_TypeError, "conversion failed"); return NULL; }
-    char *s = pln_dumps_json(v);
-    PyObject *result = PyUnicode_FromString(s ? s : "");
-    free(s);
-    pln_value_free(v);
-    return result;
-}
-
 /* ═══════════════════════════════════════════════════════════
     Module definition
    ═══════════════════════════════════════════════════════════ */
@@ -939,8 +827,6 @@ static PyMethodDef popline_methods[] = {
     {"dumps",        py_dumps,        METH_VARARGS, "Serialize Python object to PopLine text (direct, no intermediate DOM)."},
     {"loads_stream", py_loads_stream, METH_VARARGS, "Parse a multi-message PopLine stream."},
     {"dumps_stream", py_dumps_stream, METH_VARARGS, "Serialize multiple objects to PopLine stream."},
-    {"loads_json",   py_loads_json,   METH_VARARGS, "Parse JSON text to Python object (via PopLine DOM)."},
-    {"dumps_json",   py_dumps_json,   METH_VARARGS, "Serialize Python object to JSON text (via PopLine DOM)."},
     {NULL, NULL, 0, NULL}
 };
 
