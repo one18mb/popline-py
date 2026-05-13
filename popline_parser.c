@@ -1,253 +1,89 @@
-/* popline_parser.c — PopLine 解析器：直接 DOM 构建，零拷贝逐行解析 */
+/* popline_parser.c — PopLine single-pass state machine parser */
 #include "popline.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
 
-/* 从 popline.c 引用的内部函数（非 public API） */
+/* Internal declarations from popline.c */
 pln_value_t *pln_value_new(pln_value_type_t t);
 int pln_unescape_to(const char *s, int len, char *dst);
 char *pln_unescape(const char *s, int len);
 
-/* ═══════════════════════════════════════════════════════════════
-   逐行解析，直接构建 DOM 树，零事件中转，零拷贝
-   ═══════════════════════════════════════════════════════════════ */
+/* ─── Frame stack ────────────────────────────────────────── */
 
 typedef struct {
     pln_value_t *container;
     pln_value_t **tail;
-} fctx_frame_t;
+} frame_t;
 
 typedef struct {
     pln_value_t *root;
-    fctx_frame_t *frames;
-    int frames_len, frames_cap;
+    frame_t *frames;
+    int frame_count, frame_cap;
     char *key;
     char *strbuf;
     int strbuf_len, strbuf_cap;
     int in_string;
     char error[256];
-} fctx_t;
+} parse_ctx_t;
 
-static void fctx_init(fctx_t *f) {
-    memset(f, 0, sizeof(*f));
-    f->frames_cap = 64;
-    f->frames = (fctx_frame_t *)malloc(f->frames_cap * sizeof(fctx_frame_t));
+static void ctx_init(parse_ctx_t *c) {
+    memset(c, 0, sizeof(*c));
+    c->frame_cap = 64;
+    c->frames = (frame_t *)malloc(c->frame_cap * sizeof(frame_t));
 }
 
-static void fctx_free(fctx_t *f) {
-    free(f->frames);
-    free(f->key);
-    free(f->strbuf);
-    f->frames = NULL;
+static void ctx_free(parse_ctx_t *c) {
+    free(c->frames);
+    free(c->key);
+    free(c->strbuf);
+    c->frames = NULL;
 }
 
-static void fctx_push(fctx_t *f, pln_value_t *v) {
-    if (f->frames_len >= f->frames_cap) {
-        f->frames_cap *= 2;
-        f->frames = (fctx_frame_t *)realloc(f->frames, f->frames_cap * sizeof(fctx_frame_t));
+static void frame_push(parse_ctx_t *c, pln_value_t *v) {
+    if (c->frame_count >= c->frame_cap) {
+        c->frame_cap *= 2;
+        c->frames = (frame_t *)realloc(c->frames, c->frame_cap * sizeof(frame_t));
     }
-    f->frames[f->frames_len].container = v;
-    f->frames[f->frames_len].tail = v ? &v->child : NULL;
-    f->frames_len++;
+    c->frames[c->frame_count].container = v;
+    c->frames[c->frame_count].tail = v ? &v->child : NULL;
+    c->frame_count++;
 }
 
-static pln_value_t *fctx_top(fctx_t *f) {
-    return f->frames_len > 0 ? f->frames[f->frames_len - 1].container : NULL;
+static void frame_add(parse_ctx_t *c, pln_value_t *v) {
+    frame_t *fr = &c->frames[c->frame_count - 1];
+    v->key = c->key;
+    c->key = NULL;
+    *fr->tail = v;
+    fr->tail = &v->next;
 }
 
-static void fctx_add_value(fctx_t *f, pln_value_t *v) {
-    if (f->frames_len == 0) {
-        f->root = v;
-        fctx_push(f, NULL);
-    } else {
-        fctx_frame_t *frame = &f->frames[f->frames_len - 1];
-        v->key = f->key;
-        f->key = NULL;
-        *frame->tail = v;
-        frame->tail = &v->next;
-    }
+static void frame_pop_n(parse_ctx_t *c, int n) {
+    if (n > c->frame_count) n = c->frame_count;
+    c->frame_count -= n;
 }
 
-static void fctx_pop_layers(fctx_t *f, int n) {
-    if (n > f->frames_len) n = f->frames_len;
-    f->frames_len -= n;
-}
+/* ─── String buffer helpers ──────────────────────────────── */
 
-static void fsb_ensure(fctx_t *f, int extra) {
-    while (f->strbuf_len + extra + 1 > f->strbuf_cap) {
-        f->strbuf_cap = f->strbuf_cap ? f->strbuf_cap * 2 : 256;
-        f->strbuf = (char *)realloc(f->strbuf, f->strbuf_cap);
+static void strbuf_grow(parse_ctx_t *c, int extra) {
+    while (c->strbuf_len + extra + 1 > c->strbuf_cap) {
+        c->strbuf_cap = c->strbuf_cap ? c->strbuf_cap * 2 : 256;
+        c->strbuf = (char *)realloc(c->strbuf, c->strbuf_cap);
     }
 }
 
-static void fsb_append(fctx_t *f, const char *s, int n) {
-    fsb_ensure(f, n);
-    memcpy(f->strbuf + f->strbuf_len, s, n);
-    f->strbuf_len += n;
-    f->strbuf[f->strbuf_len] = '\0';
+static void strbuf_add(parse_ctx_t *c, const char *s, int n) {
+    strbuf_grow(c, n);
+    memcpy(c->strbuf + c->strbuf_len, s, n);
+    c->strbuf_len += n;
+    c->strbuf[c->strbuf_len] = '\0';
 }
 
-/* ─── 快速值解析（零拷贝，直接返回 pln_value_t*） ───── */
+/* ─── Validate " N" suffix after closing quote ──────────── */
 
-static inline pln_value_t *fparse_string_body(fctx_t *f, const char *s, int len) {
-    int i = 0;
-    int has_esc = 0;
-    while (1) {
-        if (__builtin_expect(i >= len, 0)) {
-            f->in_string = 1;
-            f->strbuf_len = 0;
-            fsb_append(f, s, len);
-            fsb_append(f, "\n", 1);
-            return NULL;
-        }
-        if (s[i] == '"') {
-            if (i + 1 < len && s[i + 1] == '"') { has_esc = 1; i += 2; continue; }
-            break;
-        }
-        i++;
-    }
-    if (__builtin_expect(!has_esc, 1)) {
-        return pln_value_new_string_len(s, i);
-    }
-    int out_len = pln_unescape_to(s, i, NULL);
-    pln_value_t *v = pln_value_new(PLN_STRING);
-    v->data.string_val = (char *)malloc(out_len + 1);
-    pln_unescape_to(s, i, v->data.string_val);
-    v->data.string_val[out_len] = '\0';
-    return v;
-}
-
-__attribute__((always_inline))
-static inline pln_value_t *fparse_value(fctx_t *f, const char *s, int len) {
-    if (len <= 0) return NULL;
-
-    switch (s[0]) {
-    case '"':
-        return fparse_string_body(f, s + 1, len - 1);
-    case 't':
-        if (len == 4 && memcmp(s, "true", 4) == 0) return pln_value_new_bool(1);
-        goto invalid;
-    case 'f':
-        if (len == 5 && memcmp(s, "false", 5) == 0) return pln_value_new_bool(0);
-        goto invalid;
-    case 'n':
-        if (len == 4 && memcmp(s, "null", 4) == 0) return pln_value_new_null();
-        goto invalid;
-    case '{':
-        if (len == 1) return pln_value_new_object();
-        goto invalid;
-    case '[':
-        if (len == 1) return pln_value_new_array();
-        goto invalid;
-    }
-
-    if (s[0] == '-' || (s[0] >= '0' && s[0] <= '9')) {
-        char tmp[64];
-        if (len >= (int)sizeof(tmp)) goto invalid;
-        memcpy(tmp, s, len); tmp[len] = '\0';
-
-        int is_float = 0;
-        for (int i = 0; i < len; i++) {
-            if (tmp[i] == '.' || tmp[i] == 'e' || tmp[i] == 'E') { is_float = 1; break; }
-        }
-        char *end;
-        errno = 0;
-        if (is_float) {
-            double d = strtod(tmp, &end);
-            if (end == tmp + len && errno != ERANGE) return pln_value_new_float(d);
-        } else {
-            long long ll = strtoll(tmp, &end, 10);
-            if (end == tmp + len && errno != ERANGE) return pln_value_new_int(ll);
-        }
-    }
-
-invalid:
-    snprintf(f->error, sizeof(f->error), "字符串必须用双引号包裹: '%.*s'", len, s);
-    return NULL;
-}
-
-/* Forward declarations for pop suffix helpers */
-static inline int fwd_trim_pop_suffix(const char *s, int len, int *value_len);
-static inline int pop_suffix_after(const char *s, int len);
-
-static inline int fhandle_string_line(fctx_t *f, const char *line, int len) {
-    int i = 0;
-    while (1) {
-        if (i >= len) {
-            fsb_append(f, line, len);
-            fsb_append(f, "\n", 1);
-            return 0;
-        }
-        if (line[i] == '"') {
-            if (i + 1 < len && line[i + 1] == '"') { i += 2; continue; }
-            break;
-        }
-        i++;
-    }
-    fsb_append(f, line, i);
-
-    /* 检查闭合引号后内容：空=0，" N"=弹出数，其他=-1 */
-    int after = i + 1;
-    if (after < len) {
-        int n_pop = pop_suffix_after(line + after, len - after);
-        if (n_pop < 0) {
-            snprintf(f->error, sizeof(f->error),
-                     "字符串闭合引号后非法内容: '%.*s'", len - after, line + after);
-            return -1;
-        }
-        char *unesc = pln_unescape(f->strbuf, f->strbuf_len);
-        pln_value_t *v = pln_value_new_string(unesc);
-        free(unesc);
-        fctx_add_value(f, v);
-        if (n_pop > 0) fctx_pop_layers(f, n_pop);
-        f->in_string = 0;
-        f->strbuf_len = 0;
-        return 1;
-    }
-
-    char *unesc = pln_unescape(f->strbuf, f->strbuf_len);
-    pln_value_t *v = pln_value_new_string(unesc);
-    free(unesc);
-    fctx_add_value(f, v);
-    f->in_string = 0;
-    f->strbuf_len = 0;
-    return 1;
-}
-
-
-/* ─── 行末弹出后缀检测 ────────────────────────── */
-
-/* 正向扫描弹出后缀 ` N`：遇到空格时检查剩余是否全为数字 */
-__attribute__((always_inline))
-static inline int fwd_trim_pop_suffix(const char *s, int len, int *value_len) {
-    int in_string = 0;
-    for (int i = 0; i < len; i++) {
-        if (s[i] == '"') in_string = !in_string;
-        if (!in_string && s[i] == ' ') {
-            int all_digits = 1;
-            for (int j = i + 1; j < len; j++) {
-                if (s[j] < '0' || s[j] > '9') { all_digits = 0; break; }
-            }
-            if (all_digits && i + 1 < len) {
-                int n = 0;
-                for (int j = i + 1; j < len; j++) n = n * 10 + (s[j] - '0');
-                *value_len = i;
-                return n;
-            }
-        }
-    }
-    *value_len = len;
-    return 0;
-}
-
-/* 验证字符串闭合引号后内容：空=0，有效" N"=N，无效=-1 */
-__attribute__((always_inline))
-static inline int pop_suffix_after(const char *s, int len) {
-    if (len <= 0) return 0;
-    if (s[0] != ' ') return -1;
-    if (len < 2 || s[1] < '0' || s[1] > '9') return -1;
+static int check_pop_suffix(const char *s, int len) {
+    if (len <= 0 || s[0] != ' ') return -1;
     int n = 0;
     for (int i = 1; i < len; i++) {
         if (s[i] < '0' || s[i] > '9') return -1;
@@ -256,123 +92,264 @@ static inline int pop_suffix_after(const char *s, int len) {
     return n;
 }
 
-/* ─── 逐行解析（行末弹出后缀版） ──────────────── */
+/* ─── Single-pass value parser: type + pop suffix + number ── */
 
-__attribute__((always_inline))
-static inline int fparse_line(fctx_t *f, const char *line, int len) {
-    if (len > 0 && line[len - 1] == '\r') len--;
+static pln_value_t *parse_value(parse_ctx_t *c, const char *s, int len, int *pop_out) {
+    *pop_out = 0;
+    if (len <= 0) { snprintf(c->error, sizeof(c->error), "empty value"); return NULL; }
 
-    if (f->in_string) return fhandle_string_line(f, line, len);
-
-    /* 消息体内不允许空行（frames_len > 0 表示在容器内） */
-    if (len == 0) {
-        if (f->frames_len > 0) { snprintf(f->error, sizeof(f->error), "消息体内不允许空行"); return -1; }
-        return 0;
+    /* String */
+    if (s[0] == '"') {
+        int i = 1;
+        while (i < len) {
+            if (s[i] == '"') {
+                if (i + 1 < len && s[i + 1] == '"') { i += 2; continue; }
+                break;
+            }
+            i++;
+        }
+        if (i >= len) {
+            c->in_string = 1;
+            c->strbuf_len = 0;
+            strbuf_add(c, s + 1, len - 1);
+            strbuf_add(c, "\n", 1);
+            return NULL;
+        }
+        int after = i + 1;
+        if (after < len) {
+            int np = check_pop_suffix(s + after, len - after);
+            if (np < 0) { snprintf(c->error, sizeof(c->error), "invalid after closing quote"); return NULL; }
+            *pop_out = np;
+        }
+        int has_esc = 0;
+        for (int j = 1; j < i; j++) {
+            if (s[j] == '"' && j + 1 < i && s[j + 1] == '"') { has_esc = 1; break; }
+        }
+        if (!has_esc) return pln_value_new_string_len(s + 1, i - 1);
+        int out_len = pln_unescape_to(s + 1, i - 1, NULL);
+        pln_value_t *v = pln_value_new(PLN_STRING);
+        v->data.string_val = (char *)malloc(out_len + 1);
+        pln_unescape_to(s + 1, i - 1, v->data.string_val);
+        v->data.string_val[out_len] = '\0';
+        return v;
     }
 
-    const char *rest = line;
-    int rest_len = len;
+    /* Pop suffix: check from end (O(1) for non-digit tail) */
+    int value_end = len;
+    if (len >= 2 && s[len - 1] >= '0' && s[len - 1] <= '9') {
+        int i = len - 1;
+        while (i > 0 && s[i - 1] >= '0' && s[i - 1] <= '9') i--;
+        if (i > 0 && s[i - 1] == ' ') {
+            int n = 0;
+            for (int j = i; j < len; j++) n = n * 10 + (s[j] - '0');
+            *pop_out = n;
+            value_end = i - 1;
+        }
+    }
 
-    /* 顶层：支持所有类型为根值 */
-    if (f->root == NULL) {
-        pln_value_t *v = fparse_value(f, rest, rest_len);
-        if (!v) return f->error[0] ? -1 : 0;
-        f->root = v;
-        if (v->type == PLN_OBJECT || v->type == PLN_ARRAY) {
-            fctx_push(f, v);
+    /* Keywords */
+    if (value_end == 4 && memcmp(s, "true", 4) == 0) return pln_value_new_bool(1);
+    if (value_end == 5 && memcmp(s, "false", 5) == 0) return pln_value_new_bool(0);
+    if (value_end == 4 && memcmp(s, "null", 4) == 0) return pln_value_new_null();
+
+    /* Number */
+    if (s[0] == '-' || (s[0] >= '0' && s[0] <= '9')) {
+        char tmp[64];
+        if (value_end >= (int)sizeof(tmp)) goto invalid;
+        memcpy(tmp, s, value_end);
+        tmp[value_end] = '\0';
+        int is_float = 0;
+        for (int i = 0; i < value_end; i++) {
+            if (tmp[i] == '.' || tmp[i] == 'e' || tmp[i] == 'E') { is_float = 1; break; }
+        }
+        char *end;
+        errno = 0;
+        if (is_float) {
+            double d = strtod(tmp, &end);
+            if (end == tmp + value_end && errno != ERANGE) return pln_value_new_float(d);
         } else {
-            return 1; /* 标量根值：消息完整 */
+            long long ll = strtoll(tmp, &end, 10);
+            if (end == tmp + value_end && errno != ERANGE) return pln_value_new_int(ll);
         }
-        return 0;
-    }
-    /* frames_len == 0 表示消息已结束（标量根值或全部弹出）*/
-    if (f->frames_len == 0) return 1;
-
-    pln_value_t *top = fctx_top(f);
-
-    if (top->type == PLN_OBJECT) {
-        int key_sep = -1;
-        for (int i = 0; i < rest_len - 1; i++) {
-            char c = rest[i];
-            if (c == ':') {
-                if (rest[i + 1] == ' ') { key_sep = i; break; }
-                snprintf(f->error, sizeof(f->error), "非法键名: '%.*s'", rest_len, rest);
-                return -1;
-            }
-            if (c == '"' || c == '{' || c == '[' ||
-                c == '#' || c == ' ' || c == '\t') {
-                snprintf(f->error, sizeof(f->error), "非法键名: '%.*s'", rest_len, rest);
-                return -1;
-            }
-        }
-        if (key_sep < 0) {
-            snprintf(f->error, sizeof(f->error), "对象内行必须 'key: value': '%.*s'", rest_len, rest);
-            return -1;
-        }
-        int klen = key_sep;
-        free(f->key);
-        f->key = (char *)malloc(klen + 1);
-        memcpy(f->key, rest, klen); f->key[klen] = '\0';
-
-        const char *vpart = rest + klen + 2;
-        int vlen = rest_len - klen - 2;
-
-        /* 正向扫描弹出后缀（仅叶值，容器开标识不处理） */
-        int n_pop = 0;
-        int val_len = vlen;
-        if (vpart[0] != '{' && vpart[0] != '[')
-            n_pop = fwd_trim_pop_suffix(vpart, vlen, &val_len);
-
-        pln_value_t *v = fparse_value(f, vpart, val_len);
-        if (!v) return f->error[0] ? -1 : 0;
-        fctx_add_value(f, v);
-        if (v->type == PLN_OBJECT || v->type == PLN_ARRAY) fctx_push(f, v);
-        if (n_pop > 0) fctx_pop_layers(f, n_pop);
-        return 0;
     }
 
-    if (top->type == PLN_ARRAY) {
-        /* 正向扫描弹出后缀（仅叶值） */
-        int n_pop = 0;
-        int rest_val_len = rest_len;
-        if (rest_len > 0 && rest[0] != '{' && rest[0] != '[')
-            n_pop = fwd_trim_pop_suffix(rest, rest_len, &rest_val_len);
-
-        pln_value_t *v = fparse_value(f, rest, rest_val_len);
-        if (!v) return f->error[0] ? -1 : 0;
-        fctx_add_value(f, v);
-        if (v->type == PLN_OBJECT || v->type == PLN_ARRAY) fctx_push(f, v);
-        if (n_pop > 0) fctx_pop_layers(f, n_pop);
-        return 0;
-    }
-
-    return 0;
+invalid:
+    snprintf(c->error, sizeof(c->error), "invalid value: '%.*s'", value_end, s);
+    return NULL;
 }
 
+/* ─── Main parse loop (single-pass state machine) ────────── */
+
 pln_value_t *pln_loads(const char *text) {
-    fctx_t f;
-    fctx_init(&f);
+    parse_ctx_t c;
+    ctx_init(&c);
+    const char *pos = text;
 
-    const char *s = text;
-    const char *line_start = s;
-
-    for (;;) {
-        const char *nl = strchr(s, '\n');
-        if (nl) {
-            int r = fparse_line(&f, line_start, (int)(nl - line_start));
-            if (r < 0) { pln_value_free(f.root); f.root = NULL; break; }
-            if (r > 0) break; /* 消息完整，停止解析 */
-            s = nl + 1;
-            line_start = s;
-        } else {
-            if (*line_start) {
-                int r = fparse_line(&f, line_start, (int)strlen(line_start));
-                if (r < 0) { pln_value_free(f.root); f.root = NULL; }
+    while (*pos) {
+        /* ── String continuation (highest priority) ── */
+        if (c.in_string) {
+            const char *q = strchr(pos, '"');
+            if (!q) break;
+            if (q > pos) {
+                strbuf_grow(&c, (int)(q - pos));
+                memcpy(c.strbuf + c.strbuf_len, pos, q - pos);
+                c.strbuf_len += (int)(q - pos);
+                c.strbuf[c.strbuf_len] = '\0';
             }
-            break;
+            if (q[1] == '"') {
+                c.strbuf[c.strbuf_len++] = '"';
+                c.strbuf[c.strbuf_len] = '\0';
+                pos = q + 2;
+                continue;
+            }
+            c.in_string = 0;
+            const char *after_quote = q + 1;
+            pos = after_quote + 1;
+            const char *nl = strchr(after_quote, '\n');
+            int trail_len = nl ? (int)(nl - after_quote) : (int)strlen(after_quote);
+            /* Strip trailing whitespace before checking pop suffix */
+            while (trail_len > 0 && (after_quote[trail_len - 1] == ' ' || after_quote[trail_len - 1] == '\t'))
+                trail_len--;
+            int pop = 0;
+            if (trail_len > 0) {
+                pop = check_pop_suffix(after_quote, trail_len);
+                if (pop < 0) { ctx_free(&c); return NULL; }
+            }
+            char *unesc = pln_unescape(c.strbuf, c.strbuf_len);
+            pln_value_t *sv = pln_value_new_string(unesc);
+            free(unesc);
+            c.strbuf_len = 0;
+            frame_add(&c, sv);
+            frame_pop_n(&c, pop);
+            if (nl) pos = nl + 1;
+            continue;
+        }
+
+        /* ── Find line boundary ── */
+        const char *nl = strchr(pos, '\n');
+        int line_len = nl ? (int)(nl - pos) : (int)strlen(pos);
+        const char *line = pos;
+        if (line_len > 0 && line[line_len - 1] == '\r') line_len--;
+        pos = nl ? nl + 1 : pos + line_len;
+
+        /* ── Empty line handling ── */
+        if (line_len == 0) {
+            if (c.frame_count > 0) { ctx_free(&c); return NULL; }
+            continue;
+        }
+
+        /* ── Root level ── */
+        if (c.frame_count == 0) {
+            if (line_len > 1 && line[0] == '[') {
+                const char *t = line + 1;
+                while (t < line + line_len && (*t == ' ' || *t == '\t')) t++;
+                if (t < line + line_len && (t[0] == '[' || t[0] == '{')) {
+                    const char *x = line;
+                    while (x < line + line_len) {
+                        while (x < line + line_len && (*x == ' ' || *x == '\t')) x++;
+                        if (x >= line + line_len || (*x != '{' && *x != '[')) break;
+                        pln_value_t *cv = *x == '{' ? pln_value_new_object() : pln_value_new_array();
+                        c.root = cv;
+                        frame_push(&c, cv);
+                        x++;
+                    }
+                    continue;
+                }
+            }
+            if (line_len == 1 && line[0] == '{') {
+                c.root = pln_value_new_object();
+                frame_push(&c, c.root);
+                continue;
+            }
+            if (line_len == 1 && line[0] == '[') {
+                c.root = pln_value_new_array();
+                frame_push(&c, c.root);
+                continue;
+            }
+            int pop = 0;
+            pln_value_t *sv = parse_value(&c, line, line_len, &pop);
+            if (!sv) { ctx_free(&c); return NULL; }
+            c.root = sv;
+            ctx_free(&c);
+            return sv;
+        }
+
+        /* ── Non-root: object or array ── */
+        int is_obj = c.frames[c.frame_count - 1].container->type == PLN_OBJECT;
+
+        if (is_obj) {
+            /* Find ": " separator and validate key in one pass */
+            int sep = -1;
+            for (int i = 0; i < line_len - 1; i++) {
+                char ch = line[i];
+                if (ch == ':' && line[i + 1] == ' ') { sep = i; break; }
+                if (ch == ':' || ch == '"' || ch == '{' || ch == '[' || ch == '#' || ch == ' ' || ch == '\t') {
+                    ctx_free(&c); return NULL;
+                }
+            }
+            if (sep < 0) { ctx_free(&c); return NULL; }
+            free(c.key);
+            c.key = (char *)malloc(sep + 1);
+            memcpy(c.key, line, sep);
+            c.key[sep] = '\0';
+
+            const char *val_part = line + sep + 2;
+            int val_len = line_len - sep - 2;
+
+            if (val_len == 1 && val_part[0] == '{') {
+                pln_value_t *obj = pln_value_new_object();
+                frame_add(&c, obj);
+                frame_push(&c, obj);
+            } else if (val_len == 1 && val_part[0] == '[') {
+                pln_value_t *arr = pln_value_new_array();
+                frame_add(&c, arr);
+                frame_push(&c, arr);
+            } else {
+                int pop = 0;
+                pln_value_t *vv = parse_value(&c, val_part, val_len, &pop);
+                if (!vv && !c.in_string) { ctx_free(&c); return NULL; }
+                if (vv) { frame_add(&c, vv); frame_pop_n(&c, pop); }
+            }
+        } else {
+            /* Array: inline containers, bare {/[ or scalar */
+            if (line_len > 1) {
+                char b0 = line[0];
+                if (b0 == '[' || b0 == '{') {
+                    const char *t = line + 1;
+                    while (t < line + line_len && (*t == ' ' || *t == '\t')) t++;
+                    if (t < line + line_len && (t[0] == '[' || t[0] == '{')) {
+                        const char *x = line;
+                        while (x < line + line_len) {
+                            while (x < line + line_len && (*x == ' ' || *x == '\t')) x++;
+                            if (x >= line + line_len || (*x != '{' && *x != '[')) break;
+                            pln_value_t *cv = *x == '{' ? pln_value_new_object() : pln_value_new_array();
+                            frame_add(&c, cv);
+                            frame_push(&c, cv);
+                            x++;
+                        }
+                        continue;
+                    }
+                }
+            }
+            if (line_len == 1 && line[0] == '{') {
+                pln_value_t *ov = pln_value_new_object();
+                frame_add(&c, ov);
+                frame_push(&c, ov);
+            } else if (line_len == 1 && line[0] == '[') {
+                pln_value_t *av = pln_value_new_array();
+                frame_add(&c, av);
+                frame_push(&c, av);
+            } else {
+                int pop = 0;
+                pln_value_t *vv = parse_value(&c, line, line_len, &pop);
+                if (!vv && !c.in_string) { ctx_free(&c); return NULL; }
+                if (vv) { frame_add(&c, vv); frame_pop_n(&c, pop); }
+            }
         }
     }
 
-    fctx_free(&f);
-    return f.root;
+    if (c.in_string) { ctx_free(&c); return NULL; }
+    pln_value_t *result = c.root;
+    ctx_free(&c);
+    return result;
 }
