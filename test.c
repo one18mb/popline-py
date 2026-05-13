@@ -185,11 +185,87 @@ static void unit_keys(void) {
 
 static void unit_errors(void) {
     printf("── 错误检测 ──\n");
-    CHECK(pln_loads("42\n") == NULL, "顶层标量", "should fail");
-    CHECK(pln_loads("\"str\"\n") == NULL, "顶层字符串", "should fail");
-    CHECK(pln_loads("true\n") == NULL, "顶层true", "should fail");
     CHECK(pln_loads("{\nbad:key: 1\n") == NULL, "冒号键名", "should fail");
     CHECK(pln_loads("{\n\"key\": 1\n") == NULL, "引号键名", "should fail");
+    CHECK(pln_loads("{\n  spaced: 1\n") == NULL, "空格键名", "should fail");
+}
+
+static void unit_scalar_root(void) {
+    printf("── 标量根值 ──\n");
+    pln_value_t *v;
+
+    v = pln_loads("42");
+    CHECK(v && v->type == PLN_INT && v->data.int_val == 42, "整数根值", "mismatch");
+    pln_value_free(v);
+
+    v = pln_loads("3.14159");
+    CHECK(v && v->type == PLN_FLOAT, "浮点根值", "not float");
+    pln_value_free(v);
+
+    v = pln_loads("\"hello\"");
+    CHECK(v && v->type == PLN_STRING && strcmp(v->data.string_val, "hello") == 0, "字符串根值", "mismatch");
+    pln_value_free(v);
+
+    v = pln_loads("true");
+    CHECK(v && v->type == PLN_BOOL && v->data.bool_val == 1, "布尔根值true", "mismatch");
+    pln_value_free(v);
+
+    v = pln_loads("false");
+    CHECK(v && v->type == PLN_BOOL && v->data.bool_val == 0, "布尔根值false", "mismatch");
+    pln_value_free(v);
+
+    v = pln_loads("null");
+    CHECK(v && v->type == PLN_NULL, "null根值", "not null");
+    pln_value_free(v);
+
+    v = pln_loads("-42");
+    CHECK(v && v->type == PLN_INT && v->data.int_val == -42, "负整数根值", "mismatch");
+    pln_value_free(v);
+}
+
+static void unit_scalar_roundtrip(void) {
+    printf("── 标量根值往返 ──\n");
+    struct { const char *name; const char *pl; } cases[] = {
+        {"整数",     "42"},
+        {"负整数",   "-42"},
+        {"浮点",     "3.14159"},
+        {"字符串",   "\"hello\""},
+        {"布尔真",   "true"},
+        {"布尔假",   "false"},
+        {"null",     "null"},
+    };
+    for (int i = 0; i < 7; i++) {
+        pln_value_t *v1 = pln_loads(cases[i].pl);
+        char *s = v1 ? pln_dumps(v1) : NULL;
+        pln_value_t *v2 = s ? pln_loads(s) : NULL;
+        int ok = v1 && s && v2 && dom_equal(v1, v2);
+        CHECK(ok, cases[i].name, ok ? "" : "roundtrip failed");
+        free(s); pln_value_free(v1); pln_value_free(v2);
+    }
+}
+
+static void unit_empty_lines(void) {
+    printf("── 空行 ──\n");
+    pln_value_t *v;
+
+    /* 容器内空行非法 */
+    v = pln_loads("{\n\nkey: 1\n");
+    CHECK(v == NULL, "容器内空行", "should fail");
+
+    /* 空行在根之前合法 */
+    v = pln_loads("\n\n{\nkey: 1\n");
+    CHECK(v && v->type == PLN_OBJECT, "根前空行", "should succeed");
+    pln_value_free(v);
+
+    /* 消息后空行合法（帧已闭合） */
+    v = pln_loads("{\na: 1 1\n\n");
+    CHECK(v && v->type == PLN_OBJECT, "闭合后空行", "should succeed");
+    pln_value_free(v);
+
+    /* 标量根值后空行合法 */
+    v = pln_loads("42\n\n");
+    CHECK(v && v->type == PLN_INT, "标量后空行", "should succeed");
+    pln_value_free(v);
 }
 
 static void unit_roundtrip(void) {
@@ -436,6 +512,9 @@ int main(void) {
     unit_strings();
     unit_keys();
     unit_errors();
+    unit_scalar_root();
+    unit_scalar_roundtrip();
+    unit_empty_lines();
     unit_roundtrip();
     unit_dom();
     unit_stream();

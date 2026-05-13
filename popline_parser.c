@@ -269,24 +269,27 @@ static inline int fparse_line(fctx_t *f, const char *line, int len) {
 
     if (f->in_string) return fhandle_string_line(f, line, len);
 
-    if (len == 0) return 0;
+    /* 消息体内不允许空行（frames_len > 0 表示在容器内） */
+    if (len == 0) {
+        if (f->root && f->frames_len > 0) { snprintf(f->error, sizeof(f->error), "消息体内不允许空行"); return -1; }
+        return 0;
+    }
 
     const char *rest = line;
     int rest_len = len;
 
-    /* 顶层：必须为 { 或 [ */
-    if (f->frames_len == 0 || (f->frames_len == 1 && f->frames[0].container == NULL)) {
+    /* 顶层：支持所有类型为根值 */
+    if (f->root == NULL) {
         pln_value_t *v = fparse_value(f, rest, rest_len);
         if (!v) return f->error[0] ? -1 : 0;
-        if (v->type != PLN_OBJECT && v->type != PLN_ARRAY) {
-            snprintf(f->error, sizeof(f->error), "顶层必须是对象或数组");
-            pln_value_free(v);
-            return -1;
-        }
         f->root = v;
-        fctx_push(f, v);
+        if (v->type == PLN_OBJECT || v->type == PLN_ARRAY) fctx_push(f, v);
+        /* 标量根值：消息已完整，后续内容让主循环处理 */
+        if (v->type != PLN_OBJECT && v->type != PLN_ARRAY) return 1;
         return 0;
     }
+    /* frames_len == 0 表示消息已结束（标量根值或全部弹出）*/
+    if (f->frames_len == 0) return 1;
 
     pln_value_t *top = fctx_top(f);
 
@@ -366,6 +369,7 @@ pln_value_t *pln_loads(const char *text) {
         if (nl) {
             int r = fparse_line(&f, line_start, (int)(nl - line_start));
             if (r < 0) { if (f.root) pln_value_free(f.root); f.root = NULL; break; }
+            if (r > 0) break; /* 消息完整，停止解析 */
             s = nl + 1;
             line_start = s;
         } else {

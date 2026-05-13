@@ -108,14 +108,41 @@ def test_keys():
     obj = pl_loads('{\n中文键: 1\nmy-key: 2\na.b.c: 3\nuser_id: 4\n')
     test("扩展键名", len(obj) == 4 and obj["my-key"] == 2)
 
+def test_scalar_root():
+    print("── 标量根值 ──")
+    test("整数根值", pl_loads("42") == 42)
+    test("浮点根值", isinstance(pl_loads("3.14"), float))
+    test("字符串根值", pl_loads('"hello"') == "hello")
+    test("布尔根值true", pl_loads("true") is True)
+    test("布尔根值false", pl_loads("false") is False)
+    test("null根值", pl_loads("null") is None)
+    test("负整数根值", pl_loads("-42") == -42)
+
 def test_errors():
     print("── 错误检测 ──")
-    for expr in ["42\n", '"str"\n', "true\n", '{\nbad:key: 1\n', '{\n"key": 1\n']:
+    for expr in ['{\nbad:key: 1\n', '{\n"key": 1\n']:
         try:
             pl_loads(expr)
             test(f"应报错: {expr[:20]}", False, "应该抛出异常")
         except ValueError:
             test(f"正确报错: {expr[:20]}", True)
+
+def test_empty_lines():
+    print("── 空行 ──")
+    # 容器内空行应报错
+    try:
+        pl_loads("{\n\nkey: 1\n")
+        test("容器内空行", False, "应该报错")
+    except ValueError:
+        test("容器内空行报错", True)
+
+    # 根前空行合法
+    obj = pl_loads("\n\n{\nkey: 1\n")
+    test("根前空行", obj == {"key": 1})
+
+    # 标量根值后空行合法
+    obj = pl_loads("42\n\n")
+    test("标量后空行", obj == 42)
 
 def test_roundtrip():
     print("── 往返测试 ──")
@@ -263,7 +290,9 @@ def main():
     test_pop()
     test_strings()
     test_keys()
+    test_scalar_root()
     test_errors()
+    test_empty_lines()
     test_roundtrip()
     test_json_consistency()
     test_real_data()

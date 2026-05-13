@@ -554,13 +554,21 @@ static int pp_parse_line(py_parse_ctx_t *pp, const char *line, int len) {
 
     if (pp->in_string) return pp_handle_string_line(pp, line, len);
 
-    if (len == 0) return 0;  /* empty line = message separator */
+    /* 消息体内不允许空行（frames_len > 1 表示在容器内） */
+    if (len == 0) {
+        if (pp->frames_len > 1) {
+            snprintf(pp->error, sizeof(pp->error), "消息体内不允许空行");
+            return -1;
+        }
+        return 0;
+    }
 
     const char *rest = line;
     int rest_len = len;
 
-    /* Root level: must be { or [ */
-    if (pp->frames_len == 0 || (pp->frames_len == 1 && pp->types[0] == -1)) {        if (rest_len == 1 && *rest == '{') {
+    /* Root level: 支持所有类型 */
+    if (pp->frames_len == 0 || (pp->frames_len == 1 && pp->types[0] == -1)) {
+        if (rest_len == 1 && *rest == '{') {
             PyObject *d = PyDict_New();
             pp_push(pp, d, 0);
             return 0;
@@ -570,8 +578,13 @@ static int pp_parse_line(py_parse_ctx_t *pp, const char *line, int len) {
             pp_push(pp, a, 1);
             return 0;
         }
-        snprintf(pp->error, sizeof(pp->error), "顶层必须是对象或数组");
-        return -1;
+        /* 标量根值 */
+        PyObject *v = pp_parse_scalar(pp, rest, rest_len);
+        if (!v) return -1;
+        pp->frames[1] = v;
+        pp->types[1] = -2;  /* scalar root marker */
+        pp->frames_len = 2;
+        return 1;  /* message complete */
     }
 
     int typ = pp_top_type(pp);
@@ -681,6 +694,7 @@ static PyObject *py_loads_direct(const char *text) {
                 pp_free(&pp);
                 return NULL;
             }
+            if (r > 0) break; /* message complete */
             s = nl + 1;
             line_start = s;
         } else {
