@@ -14,6 +14,7 @@ module = Extension(
         'popline_module.c',
         'popline.c',
         'popline_parser.c',
+        'popline_sax.c',
     ],
     include_dirs=['.'],
     extra_compile_args=['-O2'],

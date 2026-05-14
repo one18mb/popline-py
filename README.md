@@ -2,6 +2,8 @@
 
 PopLine 序列化格式的 Python C 扩展实现。零外部依赖。
 
+**v0.4.0：** 解析改用 SAX 接口（`pln_sax_parse`）直接构建 Python 对象，序列化使用 C 核心生成器 API，均无中间 `pln_value_t` DOM。
+
 ## 安装
 
 ```bash
@@ -13,23 +15,23 @@ pip install popline-py
 ```python
 import pln
 
-# PopLine → Python 对象
+# PopLine → Python 对象（SAX 解析，零 DOM）
 obj = pln.loads('{\nkey: "value"\n')
 # → {"key": "value"}
 
-# Python 对象 → PopLine
+# Python 对象 → PopLine（生成器 API，不经过中间 DOM）
 text = pln.dumps({"key": "value"})
 # → '{\nkey: "value"\n'
 ```
 
 ## 性能
 
-测试数据：`package.json`（17011 B）→ `package.pln`（13074 B，**76.9%**），5000 次迭代
+测试数据：`package.json`（17011 B）→ `package.pln`（13076 B，**76.9%**），5000 次迭代
 
 | 操作 | Python json | pln | 比 |
 |------|------------|---------|------|
-| 解析 | 689 ms (137 µs/op) | 626 ms (125 µs/op) | **0.91x** |
-| 序列化 | 935 ms (187 µs/op) | 213 ms (42 µs/op) | **0.23x** |
+| 解析 | 666 ms (133 µs/op) | 575 ms (115 µs/op) | **0.86x** |
+| 序列化 | 1069 ms (214 µs/op) | 236 ms (47 µs/op) | **0.22x** |
 
 ## 测试
 

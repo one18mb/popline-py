@@ -62,6 +62,7 @@ void pln_gen_value_bool(pln_gen_t *g, int v);
 void pln_gen_value_int(pln_gen_t *g, long long v);
 void pln_gen_value_float(pln_gen_t *g, double v);
 void pln_gen_value_string(pln_gen_t *g, const char *v);
+void pln_gen_flush(pln_gen_t *g);
 const char *pln_gen_getvalue(pln_gen_t *g);
 void pln_gen_free(pln_gen_t *g);
 

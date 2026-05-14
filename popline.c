@@ -232,6 +232,24 @@ void pln_gen_value_string(pln_gen_t *g, const char *v) {
     }
 }
 
+void pln_gen_flush(pln_gen_t *g) {
+    if (g->pending_pop > 0) {
+        if (g->len > 0 && g->buf[g->len - 1] == '\n') {
+            char tmp[16];
+            int i = 0, x = g->pending_pop;
+            int p = g->len - 1;
+            if (x >= 10) { if (x >= 100) { tmp[i++] = '0' + x/100; x %= 100; } tmp[i++] = '0' + x/10; x %= 10; }
+            tmp[i++] = '0' + x;
+            g_ensure(g, i + 1);
+            memmove(g->buf + p + i + 1, g->buf + p, 1);
+            g->buf[p] = ' ';
+            memcpy(g->buf + p + 1, tmp, i);
+            g->len += i + 1;
+        }
+        g->pending_pop = 0;
+    }
+}
+
 const char *pln_gen_getvalue(pln_gen_t *g) {
     g_ensure(g, 1);
     g->buf[g->len] = '\0';
@@ -353,7 +371,7 @@ char *pln_dumps(pln_value_t *v) {
     pln_gen_init(&g);
     pln_write_value(&g, v);
     /* Flush remaining pop: all containers including root close explicitly */
-    if (g.pending_pop > 0 && g.has_leaf_value) g_flush_pop(&g);
+    if (g.pending_pop > 0 && g.has_leaf_value) pln_gen_flush(&g);
     const char *s = pln_gen_getvalue(&g);
     char *result = pln_strdup(s);
     pln_gen_free(&g);
