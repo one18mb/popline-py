@@ -1,1 +1,4 @@
 include popline.h
+include popline.c
+include popline_parser.c
+include popline_sax.c
