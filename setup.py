@@ -22,7 +22,7 @@ module = Extension(
 
 setup(
     name='popline-py',
-    version='0.4.0',
+    version='0.4.1',
     description='PopLine — Line-oriented serialization format (C extension)',
     long_description=long_desc,
     long_description_content_type='text/markdown',
