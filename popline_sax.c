@@ -387,7 +387,7 @@ int pln_sax_parse(const char *text, pln_sax_cb cb, void *user_data) {
             for (int i = 0; i < line_len - 1; i++) {
                 char ch = line[i];
                 if (ch == ':' && line[i + 1] == ' ') { sep = i; break; }
-                if (ch == ':' || ch == '"' || ch == '{' || ch == '[' || ch == '#' || ch == ' ' || ch == '\t') {
+                if (ch == ':' || ch == '"' || ch == '{' || ch == '[' || ch == ' ' || ch == '\t') {
                     ret = -2; goto done;
                 }
             }

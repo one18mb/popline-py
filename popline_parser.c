@@ -283,7 +283,7 @@ pln_value_t *pln_loads(const char *text) {
             for (int i = 0; i < line_len - 1; i++) {
                 char ch = line[i];
                 if (ch == ':' && line[i + 1] == ' ') { sep = i; break; }
-                if (ch == ':' || ch == '"' || ch == '{' || ch == '[' || ch == '#' || ch == ' ' || ch == '\t') {
+                if (ch == ':' || ch == '"' || ch == '{' || ch == '[' || ch == ' ' || ch == '\t') {
                     ctx_free(&c); return NULL;
                 }
             }
