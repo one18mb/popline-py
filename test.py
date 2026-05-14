@@ -197,8 +197,8 @@ def test_json_consistency():
 
 def test_real_data():
     print("\n── 真实数据一致性 ──")
-    json_path = "test-package.json"
-    pln_path = "test-package.pln"
+    json_path = "test.json"
+    pln_path = "test.pln"
 
     if not os.path.exists(json_path) or not os.path.exists(pln_path):
         print("  SKIP: 数据文件不存在")
@@ -247,8 +247,8 @@ def bench(label, fn, n=5000):
 
 def bench_real_data():
     print("\n── 性能基准 ──")
-    json_path = "test-package.json"
-    pln_path = "test-package.pln"
+    json_path = "test.json"
+    pln_path = "test.pln"
 
     if not os.path.exists(json_path) or not os.path.exists(pln_path):
         print("  SKIP: 数据文件不存在")

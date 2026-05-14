@@ -26,7 +26,7 @@ text = pln.dumps({"key": "value"})
 
 ## 性能
 
-测试数据：`test-package.json`（17011 B）→ `test-package.pln`（13076 B，**76.9%**），5000 次迭代
+测试数据：`test.json`（17011 B）→ `test.pln`（13076 B，**76.9%**），5000 次迭代
 
 | 操作 | Python json | pln | 比 |
 |------|------------|---------|------|

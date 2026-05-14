@@ -32,7 +32,7 @@ text = pln.dumps_json({"key": "value"})
 
 ## Performance
 
-Data: `test-package.json` (17011 B) → `test-package.pln` (13074 B, **76.9%**), 5000 iterations
+Data: `test.json` (17011 B) → `test.pln` (13074 B, **76.9%**), 5000 iterations
 
 | Operation | Python json | pln | Ratio |
 |-----------|------------|---------|-------|
