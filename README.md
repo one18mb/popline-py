@@ -41,5 +41,4 @@ python test.py
 
 ## 致谢
 本项目的开发得到了以下 AI 工具的大力协助：
-- [Claude Code](https://claude.ai)（Anthropic）
 - [DeepSeek](https://deepseek.com)（深度求索）
